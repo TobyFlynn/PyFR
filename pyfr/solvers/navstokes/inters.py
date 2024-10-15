@@ -145,6 +145,19 @@ class NavierStokesCharRiemInvBCInters(NavierStokesBaseBCInters):
             ['rho', 'p', 'u', 'v', 'w'][:self.ndims + 2], lhs
         )
 
+class NavierStokesCharRiemInvVariablePBCInters(NavierStokesBaseBCInters):
+    type = 'char-riem-inv-variable-p'
+    cflux_state = 'ghost'
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
+
+        self.c |= self._exp_opts(
+            ['rho', 'u', 'v', 'w'][:self.ndims + 2], lhs
+        )
+
+        self._set_external('c_p', 'scalar fpdtype_t')
+
 
 class NavierStokesSupInflowBCInters(NavierStokesBaseBCInters):
     type = 'sup-in-fa'

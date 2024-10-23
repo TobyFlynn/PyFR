@@ -26,6 +26,8 @@ class BaseSystem:
         self.mesh = mesh
         self.cfg = cfg
         self.nregs = nregs
+        self.kernel_externs = {}
+        self.rallocs = rallocs
 
         # Obtain a nonce to uniquely identify this system
         nonce = str(next(self._nonce_seq))
@@ -252,13 +254,14 @@ class BaseSystem:
         return deps
 
     def _prepare_kernels(self, t, uinbank, foutbank):
+        self.update_kernel_extern('t', t)
         _, binders = self._get_kernels(uinbank, foutbank)
 
         for b in self._bc_inters:
-            b.prepare(t)
+            b.prepare(t, self, uinbank)
 
         for b in binders:
-            b(t=t)
+            b(**self.kernel_externs)
 
     def _rhs_graphs(self, uinbank, foutbank):
         pass
@@ -336,3 +339,6 @@ class BaseSystem:
     def set_ele_entmin_int(self, entmin_int):
         for e, em in zip(self.eles_entmin_int, entmin_int):
             e.set(em)
+
+    def update_kernel_extern(self, key, value):
+        self.kernel_externs[key] = value

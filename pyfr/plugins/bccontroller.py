@@ -174,6 +174,7 @@ class BcControllerPlugin(BaseSolverPlugin):
 
         # Cumulative error
         self.cerr = 0.0
+        self.perr = 0.0
 
         # Target Mach number
         self.targetmach = self.cfg.getfloat(cfgsect, 'target-mach')
@@ -181,6 +182,7 @@ class BcControllerPlugin(BaseSolverPlugin):
         # PI controller parameters
         self.kp = self.cfg.getfloat(cfgsect, 'kp')
         self.ki = self.cfg.getfloat(cfgsect, 'ki')
+        self.kd = self.cfg.getfloat(cfgsect, 'kd')
         self.propdelay = self.cfg.getfloat(cfgsect, 'propergation-delay')
 
         # Time average M
@@ -207,11 +209,13 @@ class BcControllerPlugin(BaseSolverPlugin):
 
         # PI controller
         err = self.targetmach - mach
-        factor = 1.0 - (self.kp * err + self.ki * self.cerr)
+        err_dt = (err - self.perr) / (intg.tcurr - self.lastupdate)
+        factor = 1.0 - (self.kp * err + self.ki * self.cerr + self.kd * self.err_dt)
         # print(f'Error: {err} Factor: {factor}')
         self.p = self.p * factor
         self.cerr = self.cerr + err
         self.lastupdate = intg.tcurr
+        self.perr = err
 
         intg.system.update_kernel_extern('c_p', self.p)
     

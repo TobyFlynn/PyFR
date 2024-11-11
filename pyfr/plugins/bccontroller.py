@@ -183,28 +183,48 @@ class BcControllerPlugin(BaseSolverPlugin):
         self.ki = self.cfg.getfloat(cfgsect, 'ki')
         self.propdelay = self.cfg.getfloat(cfgsect, 'propergation-delay')
 
+        # Time average M
+        self.m_history = []
+        self.m_history_len = self.cfg.getint(cfgsect, 'm-history-len')
+        self.m_history_interval = self.cfg.getfloat(cfgsect, 'm-history-interval')
+        self.m_last_update = -1.0
+
         # Set first p value in BC mako kernel
         self.p = self.cfg.getfloat(cfgsect, 'p')
         self.lastupdate = intg.tcurr
         intg.system.update_kernel_extern('c_p', self.p)
 
     def __call__(self, intg):
+        if intg.tcurr < self.m_last_update + self.m_history_interval or self.m_last_update < 0.0:
+            self.update_mach_history(intg)
+
         if intg.tcurr < self.lastupdate + self.propdelay:
             intg.system.update_kernel_extern('c_p', self.p)
             return
+        
         # Get Mach number
-        mach = self.mach_at_pt(intg)
+        mach = self.get_avg_mach()
 
         # PI controller
         err = self.targetmach - mach
-        factor = 1.0 + self.kp * err + self.ki * self.cerr
-        print(f'Error: {err} Factor: {factor}')
+        factor = 1.0 - (self.kp * err + self.ki * self.cerr)
+        # print(f'Error: {err} Factor: {factor}')
         self.p = self.p * factor
         self.cerr = self.cerr + err
         self.lastupdate = intg.tcurr
 
         intg.system.update_kernel_extern('c_p', self.p)
     
+    def get_avg_mach(self):
+        return sum(self.m_history) / len(self.m_history)
+
+    def update_mach_history(self, intg):
+        m = self.mach_at_pt(intg)
+        self.m_history.append(m)
+        if(len(self.m_history) > self.m_history_len):
+            self.m_history = self.m_history[len(self.m_history) - self.m_history_len:]
+        self.m_last_update = intg.tcurr
+
     def mach_at_pt(self, intg):
         primitives = self.ptsampler(intg)
         # Speed of sound

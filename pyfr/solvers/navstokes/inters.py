@@ -465,33 +465,33 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             self.set_target_mass_flow_rate(system) # Should really be in init but need system object
 
         # Check if enough time has passed
-        if t < self.lastupdate + self.propdelay:
-            system.update_kernel_extern('var_p', self.p)
-            return
+        # if t < self.lastupdate + self.propdelay:
+        #     system.update_kernel_extern('var_p', self.p)
+        #     return
 
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
 
         # PI controller to vary p to get target_mass_flow_rate
-        mass_flow = self.calculate_mass_flow(solns)
-        err = mass_flow - self.target_mass_flow_rate
-        err_dt = (err - self.perr) / (t - self.lastupdate)
-        factor = 1.0 + self.kp * err + self.ki * self.cerr + self.kd * err_dt
-        self.p = self.p * factor
-        self.cerr = self.cerr + err
-        self.lastupdate = t
-        self.perr = err
-        system.update_kernel_extern('var_p', self.p)
-        p_force = self.calculate_p(solns)
-        mom_thrust = self.calculate_momentum_thrust(solns)
-
-        # Setting p in way suggested by NASA paper
         # mass_flow = self.calculate_mass_flow(solns)
+        # err = mass_flow - self.target_mass_flow_rate
+        # err_dt = (err - self.perr) / (t - self.lastupdate)
+        # factor = 1.0 + self.kp * err + self.ki * self.cerr + self.kd * err_dt
+        # self.p = self.p * factor
+        # self.cerr = self.cerr + err
+        # self.lastupdate = t
+        # self.perr = err
+        # system.update_kernel_extern('var_p', self.p)
         # p_force = self.calculate_p(solns)
         # mom_thrust = self.calculate_momentum_thrust(solns)
 
-        # self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (self.target_mass_flow_rate / mass_flow)) + p_force)
+        # Setting p in way suggested by NASA paper
+        mass_flow = self.calculate_mass_flow(solns)
+        p_force = self.calculate_p(solns)
+        mom_thrust = self.calculate_momentum_thrust(solns)
+
+        self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (self.target_mass_flow_rate / mass_flow)) + p_force)
         # self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (mass_flow / self.target_mass_flow_rate)) + p_force)
-        # system.update_kernel_extern('var_p', self.p)
+        system.update_kernel_extern('var_p', self.p)
 
         # Save values to CSV file
         comm, rank, root = get_comm_rank_root()

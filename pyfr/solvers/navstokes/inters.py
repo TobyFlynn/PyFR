@@ -7,7 +7,7 @@ from pyfr.solvers.euler.inters import (FluidIntIntersMixin,
                                        FluidMPIIntersMixin)
 
 import math
-from collections import defaultdict
+from collections import defaultdict, deque
 from pyfr.quadrules import get_quadrule
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.inifile import NoOptionError
@@ -236,6 +236,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         # Target Mach number
         self.m = self.cfg.getfloat(cfgsect, 'm')
         self.outlet_bc_name = cfgsect[9:]
+        # Mass flow history
+        self.mf_hist_len = 100
+        self.mf_hist = deque(maxlen=self.mf_hist_len)
         # PI controller parameters
         self.kp = self.cfg.getfloat(cfgsect, 'kp')
         self.ki = self.cfg.getfloat(cfgsect, 'ki')
@@ -248,8 +251,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
 
         # Initial value of p
         self.p = self.cfg.getfloat(cfgsect, 'p')
+        self.dpdt = 0.0
 
-        self.lastupdate = 0
+        self.tprev = -1.0
 
         # TODO not have this workaround
         self.elemap_copy = elemap
@@ -435,6 +439,33 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             comm.Reduce(mpi.IN_PLACE, fm, op=mpi.SUM, root=root)
         return fm[0][0]
     
+    def update_mf(self, solns):
+        mf = self.calculate_mass_flow(solns)
+        self.mf_hist.append(mf)
+    
+    def avg_mf(self):
+        return np.mean(self.mf_hist) if self.mf_hist else 0.0
+    
+    def p_ode(self, y, avg_mf, target_mf):
+        p, dpdt = y
+        alpha = 1.0
+        eta = 2.0
+        epsilon = 30
+        d2pdt2 = (eta * (avg_mf - target_mf) - epsilon * dpdt) / alpha
+        return [dpdt, d2pdt2]
+    
+    def p_rk4_step(self, dt, y, avg_mf, target_mf):
+        k1 = self.p_ode(y, avg_mf, target_mf)
+        k2 = self.p_ode([x0 + x1 * dt * 0.5 for x0, x1 in zip(y, k1)], avg_mf, target_mf)
+        k3 = self.p_ode([x0 + x1 * dt * 0.5 for x0, x1 in zip(y, k2)], avg_mf, target_mf)
+        k4 = self.p_ode([x0 + x1 * dt for x0, x1 in zip(y, k3)], avg_mf, target_mf)
+        return [x0 + (dt / 6.0) * (x1 + 2.0 * x2 + 2.0 * x3 + x4) for x0, x1, x2, x3, x4 in zip(y, k1, k2, k3, k4)]
+
+
+    def update_p(self, dt):
+        avg_mf = self.avg_mf()
+        self.p, self.dpdt = self.p_rk4_step(dt, [self.p, self.dpdt], avg_mf, self.target_mass_flow_rate)
+    
     def prepare(self, t, system, soln):
         # Check if first prepare call
         if self.target_mass_flow_rate is None:
@@ -470,6 +501,17 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         #     return
 
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
+        self.update_mf(solns)
+        if self.tprev < 0.0:
+            self.tprev = t
+            self.update_mf(solns)
+            system.update_kernel_extern('var_p', self.p)
+            return
+        
+        self.update_p(t - self.tprev)
+        system.update_kernel_extern('var_p', self.p)
+        self.tprev = t
+
 
         # PI controller to vary p to get target_mass_flow_rate
         # mass_flow = self.calculate_mass_flow(solns)
@@ -489,9 +531,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         p_force = self.calculate_p(solns)
         mom_thrust = self.calculate_momentum_thrust(solns)
 
-        self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (self.target_mass_flow_rate / mass_flow)) + p_force)
+        # self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (self.target_mass_flow_rate / mass_flow)) + p_force)
         # self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (mass_flow / self.target_mass_flow_rate)) + p_force)
-        system.update_kernel_extern('var_p', self.p)
+        # system.update_kernel_extern('var_p', self.p)
 
         # Save values to CSV file
         comm, rank, root = get_comm_rank_root()

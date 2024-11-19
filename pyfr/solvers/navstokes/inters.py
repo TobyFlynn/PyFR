@@ -239,23 +239,11 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         # Mass flow history
         self.mf_hist_len = 100
         self.mf_hist = deque(maxlen=self.mf_hist_len)
-        # PI controller parameters
-        self.kp = self.cfg.getfloat(cfgsect, 'kp')
-        self.ki = self.cfg.getfloat(cfgsect, 'ki')
-        self.kd = self.cfg.getfloat(cfgsect, 'kd')
-        self.propdelay = self.cfg.getfloat(cfgsect, 'propergation-delay')
 
-        # Cumulative error
-        self.cerr = 0.0
-        self.perr = 0.0
-
-        # Initial value of p
-        self.p = self.cfg.getfloat(cfgsect, 'p')
+        self.p = -1.0
         self.dpdt = 0.0
-
         self.tprev = -1.0
 
-        # TODO not have this workaround
         self.elemap_copy = elemap
 
         self.target_mass_flow_rate = None
@@ -269,19 +257,22 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
 
         comm, rank, root = get_comm_rank_root()
         if rank == root:
-            self.outf = init_csv(self.cfg, cfgsect, 't,mf,p,mt')
+            self.outf = init_csv(self.cfg, cfgsect, 't,mf,p')
     
     # Setup integrating over boundary
-    def init_surface_integration(self, system):
+    def init_surface_integration(self, system, bc_name):
         # Underlying elements class
-        self.elementscls = system.elementscls
+        elementscls = system.elementscls
         # Boundary to integrate over
-        bc = f'bcon_{self.outlet_bc_name}_p{system.rallocs.prank}'
+        bc = f'bcon_{bc_name}_p{system.rallocs.prank}'
         # Get the mesh and elements
         mesh, elemap = system.mesh, self.elemap_copy
         # Interpolation matrices and quadrature weights
-        self._m0 = m0 = {}
-        self._qwts = qwts = defaultdict(list)
+        _m0 = m0 = {}
+        _qwts = qwts = defaultdict(list)
+        _eidxs = None
+        _norms = None
+        _rfpts = None
         # If we have the boundary then process the interface
         if bc in mesh:
             # Element indices, associated face normals and relative flux
@@ -307,30 +298,48 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
                     m0[etype, fidx] = eles.basis.ubasis.nodal_basis_at(ppts)
                     qwts[etype, fidx] = pwts
 
-            self._eidxs = {k: np.array(v) for k, v in eidxs.items()}
-            self._norms = {k: np.array(v) for k, v in norms.items()}
-            self._rfpts = {k: np.array(v) for k, v in rfpts.items()}
-        del self.elemap_copy
+            _eidxs = {k: np.array(v) for k, v in eidxs.items()}
+            _norms = {k: np.array(v) for k, v in norms.items()}
+            _rfpts = {k: np.array(v) for k, v in rfpts.items()}
+        return elementscls, _m0, _qwts, _eidxs, _norms, _rfpts
     
-    def set_target_mass_flow_rate(self, system):
+    def set_target_mass_flow_rate(self, system, soln):
         # Get target mass flow rate which should set the target Mach number at the inflow
-        # TODO this currently assumes that the inflow and outflow have the same area
-        self.bc_area = self.calculate_area()
-        self.target_mass_flow_rate = self.bc_area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
+        self.inflow_area = self.calculate_area(system, soln)
+        self.target_mass_flow_rate = self.inflow_area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
                                     * (self.pt / math.sqrt(self.cpTt)) * self.m \
                                     * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
     
-    def calculate_area(self):
+    def calculate_area(self, system, soln):
+        solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
         ndims, nvars = self.ndims, self.nvars
+        sol_sizes = {}
+        # Get the sizes for the area calculation
+        for etype, fidx in self.in_m0:
+            # Get the interpolation operator
+            m0 = self.in_m0[etype, fidx]
+            nfpts, nupts = m0.shape
+
+            # Extract the relevant elements from the solution
+            uupts = solns[etype][..., self.in_eidxs[etype, fidx]]
+
+            # Interpolate to the face
+            ufpts = m0 @ uupts.reshape(nupts, -1)
+            ufpts = ufpts.reshape(nfpts, nvars, -1)
+            ufpts = ufpts.swapaxes(0, 1)
+
+            # Compute the pressure
+            p = self.in_elementscls.con_to_pri(ufpts, self.cfg)[-1]
+            sol_sizes[etype, fidx] = p.shape
         fm = np.zeros((1, ndims))
         # Get the sizes for the area calculation
-        for etype, fidx in self._m0:
+        for etype, fidx in self.in_m0:
             # Array with ones so we can get area
-            area_ones = np.ones(self.sol_sizes[etype, fidx])
+            area_ones = np.ones(sol_sizes[etype, fidx])
 
             # Get the quadrature weights and normal vectors
-            qwts = self._qwts[etype, fidx]
-            norms = self._norms[etype, fidx]
+            qwts = self.in_qwts[etype, fidx]
+            norms = self.in_norms[etype, fidx]
 
             # Do the quadrature
             fm[0, :ndims] += np.einsum('i...,ij,jik', qwts, area_ones, norms)
@@ -405,40 +414,6 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             comm.Reduce(mpi.IN_PLACE, fm, op=mpi.SUM, root=root)
         return fm[0][0]
     
-    def calculate_momentum_thrust(self, solns):
-        ndims, nvars = self.ndims, self.nvars
-        fm = np.zeros((ndims, ndims))
-        # Get the sizes for the area calculation
-        for etype, fidx in self._m0:
-            # Get the interpolation operator
-            m0 = self._m0[etype, fidx]
-            nfpts, nupts = m0.shape
-
-            # Extract the relevant elements from the solution
-            uupts = solns[etype][..., self._eidxs[etype, fidx]]
-
-            # Interpolate to the face
-            ufpts = m0 @ uupts.reshape(nupts, -1)
-            ufpts = ufpts.reshape(nfpts, nvars, -1)
-            ufpts = ufpts.swapaxes(0, 1)
-
-            # Get the quadrature weights and normal vectors
-            qwts = self._qwts[etype, fidx]
-            norms = self._norms[etype, fidx]
-
-            # Do the quadrature for each dimension
-            # RhoU = ufpts[1], RhoV = ufpts[2], RhoW = ufpts[2]
-            for i in range(0, ndims):
-                rhoVel = ufpts[1 + i]
-                vel = self.elementscls.con_to_pri(ufpts, self.cfg)[1 + i]
-                fm[i, :ndims] += np.einsum('i...,ij,jik', qwts, rhoVel * vel, norms)
-        comm, rank, root = get_comm_rank_root()
-        if rank != root:
-            comm.Reduce(fm, None, op=mpi.SUM, root=root)
-        else:
-            comm.Reduce(mpi.IN_PLACE, fm, op=mpi.SUM, root=root)
-        return fm[0][0]
-    
     def update_mf(self, solns):
         mf = self.calculate_mass_flow(solns)
         self.mf_hist.append(mf)
@@ -471,40 +446,17 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         if self.target_mass_flow_rate is None:
             self.ndims = system.ndims
             self.nvars = system.nvars
-            self.init_surface_integration(system)
-            solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
-            ndims, nvars = self.ndims, self.nvars
-            self.sol_sizes = {}
-            # Get the sizes for the area calculation
-            for etype, fidx in self._m0:
-                # Get the interpolation operator
-                m0 = self._m0[etype, fidx]
-                nfpts, nupts = m0.shape
-
-                # Extract the relevant elements from the solution
-                uupts = solns[etype][..., self._eidxs[etype, fidx]]
-
-                # Interpolate to the face
-                ufpts = m0 @ uupts.reshape(nupts, -1)
-                ufpts = ufpts.reshape(nfpts, nvars, -1)
-                ufpts = ufpts.swapaxes(0, 1)
-
-                # Compute the pressure
-                p = self.elementscls.con_to_pri(ufpts, self.cfg)[-1]
-                self.sol_sizes[etype, fidx] = p.shape
-            
-            self.set_target_mass_flow_rate(system) # Should really be in init but need system object
-
-        # Check if enough time has passed
-        # if t < self.lastupdate + self.propdelay:
-        #     system.update_kernel_extern('var_p', self.p)
-        #     return
+            self.elementscls, self._m0, self._qwts, self._eidxs, self._norms, self._rfpts = self.init_surface_integration(system, self.outlet_bc_name)
+            self.in_elementscls, self.in_m0, self.in_qwts, self.in_eidxs, self.in_norms, self.in_rfpts = self.init_surface_integration(system, self.inflow_bc_name)
+            del self.elemap_copy
+            self.set_target_mass_flow_rate(system, soln)
 
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
         self.update_mf(solns)
         if self.tprev < 0.0:
             self.tprev = t
             self.update_mf(solns)
+            self.p = self.calculate_p(solns)
             system.update_kernel_extern('var_p', self.p)
             return
         
@@ -512,33 +464,13 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         system.update_kernel_extern('var_p', self.p)
         self.tprev = t
 
-
-        # PI controller to vary p to get target_mass_flow_rate
-        # mass_flow = self.calculate_mass_flow(solns)
-        # err = mass_flow - self.target_mass_flow_rate
-        # err_dt = (err - self.perr) / (t - self.lastupdate)
-        # factor = 1.0 + self.kp * err + self.ki * self.cerr + self.kd * err_dt
-        # self.p = self.p * factor
-        # self.cerr = self.cerr + err
-        # self.lastupdate = t
-        # self.perr = err
-        # system.update_kernel_extern('var_p', self.p)
-        # p_force = self.calculate_p(solns)
-        # mom_thrust = self.calculate_momentum_thrust(solns)
-
-        # Setting p in way suggested by NASA paper
+        # Output mass flow and pressure at outflow
         mass_flow = self.calculate_mass_flow(solns)
         p_force = self.calculate_p(solns)
-        mom_thrust = self.calculate_momentum_thrust(solns)
-
-        # self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (self.target_mass_flow_rate / mass_flow)) + p_force)
-        # self.p = (1.0 / self.bc_area) * (mom_thrust * (1.0 - (mass_flow / self.target_mass_flow_rate)) + p_force)
-        # system.update_kernel_extern('var_p', self.p)
-
         # Save values to CSV file
         comm, rank, root = get_comm_rank_root()
         if rank == root:
-            print(f'{t},{mass_flow},{p_force},{mom_thrust}', file=self.outf)
+            print(f'{t},{mass_flow},{p_force}', file=self.outf)
             self.outf.flush()
     
     # Copied from plugins/base.py:SurfaceMixin

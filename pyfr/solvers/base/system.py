@@ -10,7 +10,7 @@ from pyfr.backends.base import NullKernel
 from pyfr.inifile import Inifile
 from pyfr.shapes import BaseShape
 from pyfr.util import memoize, subclasses
-
+from pyfr.mpiutil import get_comm_rank_root, mpi
 
 class BaseSystem:
     elementscls = None
@@ -157,6 +157,19 @@ class BaseSystem:
         bccls = self.bbcinterscls
         bcmap = {b.type: b for b in subclasses(bccls, just_leaf=True)}
 
+        # Check if this rank has mass bc
+        has_mass_flow_bc = False
+        for f in mesh:
+            if (m := re.match(f'bcon_(.+?)_p{rallocs.prank}$', f)):
+                # Determine the config file section
+                cfgsect = f'soln-bcs-{m[1]}'
+                bctype = self.cfg.get(cfgsect, 'type')
+                has_mass_flow_bc = has_mass_flow_bc or ('char-riem-inv-mass-flow' == bctype)
+
+        # Create comm for ranks that have mass bc
+        comm, rank, root = get_comm_rank_root()
+        bcgroup = comm.Split(1 if has_mass_flow_bc else mpi.UNDEFINED)
+
         bc_inters = []
         for f in mesh:
             if (m := re.match(f'bcon_(.+?)_p{rallocs.prank}$', f)):
@@ -168,9 +181,14 @@ class BaseSystem:
 
                 # Instantiate
                 bcclass = bcmap[self.cfg.get(cfgsect, 'type')]
-                bciface = bcclass(self.backend, interarr, elemap, cfgsect,
-                                  self.cfg)
-                bc_inters.append(bciface)
+                if self.cfg.get(cfgsect, 'type') == 'char-riem-inv-mass-flow':
+                    bciface = bcclass(self.backend, interarr, elemap, cfgsect,
+                                    self.cfg, bcgroup)
+                    bc_inters.append(bciface)
+                else:
+                    bciface = bcclass(self.backend, interarr, elemap, cfgsect,
+                                    self.cfg)
+                    bc_inters.append(bciface)
 
         return bc_inters
 

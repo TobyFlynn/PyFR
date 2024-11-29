@@ -9,7 +9,7 @@ from pyfr.solvers.euler.inters import (FluidIntIntersMixin,
 import math
 from collections import defaultdict, deque
 from pyfr.quadrules import get_quadrule
-from pyfr.mpiutil import get_comm_rank_root, mpi
+from pyfr.mpiutil import mpi
 from pyfr.inifile import NoOptionError
 from pyfr.plugins.base import init_csv
 
@@ -224,7 +224,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     type = 'char-riem-inv-mass-flow'
     cflux_state = 'ghost'
 
-    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         self.gamma = self.cfg.getfloat('constants', 'gamma')
@@ -239,6 +239,12 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         # Mass flow history
         self.mf_hist_len = 100
         self.mf_hist = deque(maxlen=self.mf_hist_len)
+        # Values for ODE
+        self.alpha = self.cfg.getfloat(cfgsect, 'alpha', 1.0)
+        self.eta = self.cfg.getfloat(cfgsect, 'eta', 2.0)
+        self.epsilon = self.cfg.getfloat(cfgsect, 'epsilon', 30)
+        # MPI comm that only includes ranks that have this boundary
+        self.bccomm = bccomm
 
         self.p = -1.0
         self.dpdt = 0.0
@@ -255,9 +261,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
 
         self._set_external('var_p', 'scalar fpdtype_t')
 
-        comm, rank, root = get_comm_rank_root()
-        if rank == root:
-            self.outf = init_csv(self.cfg, cfgsect, 't,mf,p')
+        if self.bccomm.rank == 0:
+            self.outf = init_csv(self.cfg, cfgsect, 't,mf,p,pbc')
     
     # Setup integrating over boundary
     def init_surface_integration(self, system, bc_name):
@@ -305,23 +310,24 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     
     def set_target_mass_flow_rate(self, system, soln):
         # Get target mass flow rate which should set the target Mach number at the inflow
+        # Currently assumes that inflow area is the same as the outflow area
         self.inflow_area = self.calculate_area(system, soln)
         self.target_mass_flow_rate = self.inflow_area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
                                     * (self.pt / math.sqrt(self.cpTt)) * self.m \
                                     * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
-    
+
     def calculate_area(self, system, soln):
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
         ndims, nvars = self.ndims, self.nvars
         sol_sizes = {}
         # Get the sizes for the area calculation
-        for etype, fidx in self.in_m0:
+        for etype, fidx in self._m0:
             # Get the interpolation operator
-            m0 = self.in_m0[etype, fidx]
+            m0 = self._m0[etype, fidx]
             nfpts, nupts = m0.shape
 
             # Extract the relevant elements from the solution
-            uupts = solns[etype][..., self.in_eidxs[etype, fidx]]
+            uupts = solns[etype][..., self._eidxs[etype, fidx]]
 
             # Interpolate to the face
             ufpts = m0 @ uupts.reshape(nupts, -1)
@@ -329,30 +335,26 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             ufpts = ufpts.swapaxes(0, 1)
 
             # Compute the pressure
-            p = self.in_elementscls.con_to_pri(ufpts, self.cfg)[-1]
+            p = self.elementscls.con_to_pri(ufpts, self.cfg)[-1]
             sol_sizes[etype, fidx] = p.shape
-        fm = np.zeros((1, ndims))
+        fm = np.zeros((ndims))
         # Get the sizes for the area calculation
-        for etype, fidx in self.in_m0:
+        for etype, fidx in self._m0:
             # Array with ones so we can get area
             area_ones = np.ones(sol_sizes[etype, fidx])
 
             # Get the quadrature weights and normal vectors
-            qwts = self.in_qwts[etype, fidx]
-            norms = self.in_norms[etype, fidx]
+            qwts = self._qwts[etype, fidx]
+            norms = self._norms[etype, fidx]
 
             # Do the quadrature
-            fm[0, :ndims] += np.einsum('i...,ij,jik', qwts, area_ones, norms)
-        comm, rank, root = get_comm_rank_root()
-        if rank != root:
-            comm.Reduce(fm, None, op=mpi.SUM, root=root)
-        else:
-            comm.Reduce(mpi.IN_PLACE, fm, op=mpi.SUM, root=root)
-        return abs(fm[0][0])
+            fm[:ndims] += np.einsum('i...,ij,jik', qwts, area_ones, norms)
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return abs(sum(fm))
     
     def calculate_mass_flow(self, solns):
         ndims, nvars = self.ndims, self.nvars
-        fm = np.zeros((ndims, ndims))
+        fm = np.zeros((ndims))
         # Get the sizes for the area calculation
         for etype, fidx in self._m0:
             # Get the interpolation operator
@@ -375,17 +377,13 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             # RhoU = ufpts[1], RhoV = ufpts[2], RhoW = ufpts[2]
             for i in range(0, ndims):
                 rhoVel = ufpts[1 + i]
-                fm[i, :ndims] += np.einsum('i...,ij,jik', qwts, rhoVel, norms)
-        comm, rank, root = get_comm_rank_root()
-        if rank != root:
-            comm.Reduce(fm, None, op=mpi.SUM, root=root)
-        else:
-            comm.Reduce(mpi.IN_PLACE, fm, op=mpi.SUM, root=root)
-        return fm[0][0]
+                fm[i] += np.einsum('i...,ij,ji', qwts, rhoVel, norms[:,:,i])
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return sum(fm)
     
     def calculate_p(self, solns):
         ndims, nvars = self.ndims, self.nvars
-        fm = np.zeros((1, ndims))
+        fm = np.zeros((ndims))
         # Get the sizes for the area calculation
         for etype, fidx in self._m0:
             # Get the interpolation operator
@@ -406,13 +404,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             norms = self._norms[etype, fidx]
 
             # Do the quadrature for each dimension
-            fm[0, :ndims] += np.einsum('i...,ij,jik', qwts, p, norms)
-        comm, rank, root = get_comm_rank_root()
-        if rank != root:
-            comm.Reduce(fm, None, op=mpi.SUM, root=root)
-        else:
-            comm.Reduce(mpi.IN_PLACE, fm, op=mpi.SUM, root=root)
-        return fm[0][0]
+            fm[:ndims] += np.einsum('i...,ij,jik', qwts, p, norms)
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return sum(fm) / self.inflow_area
     
     def update_mf(self, solns):
         mf = self.calculate_mass_flow(solns)
@@ -423,9 +417,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     
     def p_ode(self, y, avg_mf, target_mf):
         p, dpdt = y
-        alpha = 1.0
-        eta = 2.0
-        epsilon = 30
+        alpha = self.alpha
+        eta = self.eta
+        epsilon = self.epsilon
         d2pdt2 = (eta * (avg_mf - target_mf) - epsilon * dpdt) / alpha
         return [dpdt, d2pdt2]
     
@@ -447,7 +441,6 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             self.ndims = system.ndims
             self.nvars = system.nvars
             self.elementscls, self._m0, self._qwts, self._eidxs, self._norms, self._rfpts = self.init_surface_integration(system, self.outlet_bc_name)
-            self.in_elementscls, self.in_m0, self.in_qwts, self.in_eidxs, self.in_norms, self.in_rfpts = self.init_surface_integration(system, self.inflow_bc_name)
             del self.elemap_copy
             self.set_target_mass_flow_rate(system, soln)
 
@@ -459,7 +452,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             self.p = self.calculate_p(solns)
             system.update_kernel_extern('var_p', self.p)
             return
-        
+
         self.update_p(t - self.tprev)
         system.update_kernel_extern('var_p', self.p)
         self.tprev = t
@@ -468,9 +461,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         mass_flow = self.calculate_mass_flow(solns)
         p_force = self.calculate_p(solns)
         # Save values to CSV file
-        comm, rank, root = get_comm_rank_root()
-        if rank == root:
-            print(f'{t},{mass_flow},{p_force}', file=self.outf)
+        if self.bccomm.rank == 0:
+            print(f'{t},{mass_flow},{p_force},{self.p}', file=self.outf)
             self.outf.flush()
     
     # Copied from plugins/base.py:SurfaceMixin

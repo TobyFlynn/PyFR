@@ -233,6 +233,10 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         # CpTt and Pt from inflow BC
         self.cpTt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'cpTt')
         self.pt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'pt')
+        # Inflow angle
+        self.inflow_angle = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'theta')
+        # Start p value
+        self.start_p = self.cfg.getfloat(cfgsect, 'p')
         # Target Mach number
         self.m = self.cfg.getfloat(cfgsect, 'm')
         self.outlet_bc_name = cfgsect[9:]
@@ -243,6 +247,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.alpha = self.cfg.getfloat(cfgsect, 'alpha', 1.0)
         self.eta = self.cfg.getfloat(cfgsect, 'eta', 2.0)
         self.epsilon = self.cfg.getfloat(cfgsect, 'epsilon', 30)
+        # Frequency that mf.csv should be updated
+        self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
+        self.nstep_counter = 0
         # MPI comm that only includes ranks that have this boundary
         self.bccomm = bccomm
 
@@ -315,6 +322,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.target_mass_flow_rate = self.inflow_area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
                                     * (self.pt / math.sqrt(self.cpTt)) * self.m \
                                     * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
+        self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0)
 
     def calculate_area(self, system, soln):
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
@@ -449,7 +457,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         if self.tprev < 0.0:
             self.tprev = t
             self.update_mf(solns)
-            self.p = self.calculate_p(solns)
+            self.p = self.start_p
             system.update_kernel_extern('var_p', self.p)
             return
 
@@ -458,12 +466,14 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.tprev = t
 
         # Output mass flow and pressure at outflow
-        mass_flow = self.calculate_mass_flow(solns)
-        p_force = self.calculate_p(solns)
-        # Save values to CSV file
-        if self.bccomm.rank == 0:
-            print(f'{t},{mass_flow},{p_force},{self.p}', file=self.outf)
-            self.outf.flush()
+        if self.nstep_counter % self.nsteps == 0:
+            mass_flow = self.calculate_mass_flow(solns)
+            p_force = self.calculate_p(solns)
+            # Save values to CSV file
+            if self.bccomm.rank == 0:
+                print(f'{t},{mass_flow},{p_force},{self.p}', file=self.outf)
+                self.outf.flush()
+        self.nstep_counter = self.nstep_counter + 1
     
     # Copied from plugins/base.py:SurfaceMixin
     def _surf_quad(self, itype, proj, flags=''):

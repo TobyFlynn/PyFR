@@ -466,7 +466,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.tprev = t
 
         # Output mass flow and pressure at outflow
-        if self.nstep_counter % self.nsteps == 0:
+        if self.nsteps % self.nstep_counter == 0:
             mass_flow = self.calculate_mass_flow(solns)
             p_force = self.calculate_p(solns)
             # Save values to CSV file

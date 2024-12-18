@@ -32,6 +32,8 @@ def main():
     ap.add_argument('--progress', '-p', action=ProgressSequenceAction,
                     help='show progress')
 
+    print('Hello World')
+
     # Import command
     ap_import = sp.add_parser('import', help='import --help')
     ap_import.add_argument('inmesh', type=FileType('r'),

@@ -249,7 +249,9 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.epsilon = self.cfg.getfloat(cfgsect, 'epsilon', 30)
         # Frequency that mf.csv should be updated
         self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
+        self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
         self.nstep_counter = 0
+        self.nflush_counter = 0
         # MPI comm that only includes ranks that have this boundary
         self.bccomm = bccomm
 
@@ -452,26 +454,32 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             del self.elemap_copy
             self.set_target_mass_flow_rate(system, soln)
 
-        solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
-        self.update_mf(solns)
-        if self.tprev < 0.0:
-            self.tprev = t
-            self.update_mf(solns)
-            self.p = self.start_p
-            system.update_kernel_extern('var_p', self.p)
-            return
-
-        self.update_p(t - self.tprev)
-        system.update_kernel_extern('var_p', self.p)
-        self.tprev = t
-
-        # Output mass flow and pressure at outflow
         if self.nstep_counter % self.nsteps == 0:
-            mass_flow = self.calculate_mass_flow(solns)
-            p_force = self.calculate_p(solns)
+            solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
+            self.update_mf(solns)
+            if self.tprev < 0.0:
+                self.tprev = t
+                self.update_mf(solns)
+                self.p = self.start_p
+                system.update_kernel_extern('var_p', self.p)
+                return
+
+            self.update_p(t - self.tprev)
+            system.update_kernel_extern('var_p', self.p)
+            self.tprev = t
+            # Output mass flow and pressure at outflow
+            # mass_flow = self.calculate_mass_flow(solns)
+            # p_force = self.calculate_p(solns)
             # Save values to CSV file
             if self.bccomm.rank == 0:
-                print(f'{t},{mass_flow},{p_force},{self.p}', file=self.outf)
+                print(f'{t},0,0,{self.p}', file=self.outf)
+            self.nflush_counter = self.nflush_counter + 1
+        else:
+            system.update_kernel_extern('var_p', self.p)
+
+        # Flush to file
+        if self.nflush_counter % self.nflush == 0:
+            if self.bccomm.rank == 0:
                 self.outf.flush()
         self.nstep_counter = self.nstep_counter + 1
     

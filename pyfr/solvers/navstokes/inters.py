@@ -272,7 +272,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self._set_external('var_p', 'scalar fpdtype_t')
 
         if self.bccomm.rank == 0:
-            self.outf = init_csv(self.cfg, cfgsect, 't,mf,p,pbc')
+            self.outf = init_csv(self.cfg, cfgsect, 't,mf,pbc')
     
     # Setup integrating over boundary
     def init_surface_integration(self, system, bc_name):
@@ -473,7 +473,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             # p_force = self.calculate_p(solns)
             # Save values to CSV file
             if self.bccomm.rank == 0:
-                print(f'{t},0,0,{self.p}', file=self.outf)
+                print(f'{t},{self.avg_mf()},{self.p}', file=self.outf)
             self.nflush_counter = self.nflush_counter + 1
         else:
             system.update_kernel_extern('var_p', self.p)

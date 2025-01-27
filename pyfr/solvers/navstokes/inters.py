@@ -228,6 +228,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         self.gamma = self.cfg.getfloat('constants', 'gamma')
+        self.avdr = self.cfg.getfloat('constants', 'avdr')
         # Name of inflow BC
         self.inflow_bc_name = self.cfg.get(cfgsect, 'inflow-name')
         # CpTt and Pt from inflow BC
@@ -324,7 +325,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.target_mass_flow_rate = self.inflow_area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
                                     * (self.pt / math.sqrt(self.cpTt)) * self.m \
                                     * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
-        self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0)
+        self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0) * self.avdr
 
     def calculate_area(self, system, soln):
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))

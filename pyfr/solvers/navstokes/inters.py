@@ -248,6 +248,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.alpha = self.cfg.getfloat(cfgsect, 'alpha', 1.0)
         self.eta = self.cfg.getfloat(cfgsect, 'eta', 2.0)
         self.epsilon = self.cfg.getfloat(cfgsect, 'epsilon', 30)
+        # Varient of ODE to use
+        self.varient = self.cfg.getint(cfgsect, 'varient', 0)
         # Frequency that mf.csv should be updated
         self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
         self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
@@ -431,7 +433,16 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         alpha = self.alpha
         eta = self.eta
         epsilon = self.epsilon
-        d2pdt2 = (eta * (avg_mf - target_mf) - epsilon * dpdt) / alpha
+        d2pdt2 = 0.0
+        if self.varient == 0:
+            d2pdt2 = (eta * (avg_mf - target_mf) - epsilon * dpdt) / alpha
+        elif self.varient == 1:
+            dpdt = eta * (avg_mf - target_mf)
+        elif self.varient == 2:
+            dpdt = eta * (1.0 - target_mf / avg_mf)
+        elif self.varient == 3:
+            dpdt = eta * np.sqrt(avg_mf - target_mf)
+            dpdt = -dpdt if avg_mf < target_mf else dpdt
         return [dpdt, d2pdt2]
     
     def p_rk4_step(self, dt, y, avg_mf, target_mf):

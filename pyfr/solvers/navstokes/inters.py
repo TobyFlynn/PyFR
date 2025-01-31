@@ -242,7 +242,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.m = self.cfg.getfloat(cfgsect, 'm')
         self.outlet_bc_name = cfgsect[9:]
         # Mass flow history
-        self.mf_hist_len = 100
+        self.mf_hist_len = self.cfg.getint(cfgsect, 'mf-history-len', 100)
         self.mf_hist = deque(maxlen=self.mf_hist_len)
         # Values for ODE
         self.alpha = self.cfg.getfloat(cfgsect, 'alpha', 1.0)

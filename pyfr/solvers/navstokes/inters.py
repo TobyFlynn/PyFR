@@ -245,9 +245,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.mf_hist_len = 100
         self.mf_hist = deque(maxlen=self.mf_hist_len)
         # Values for ODE
-        self.alpha = self.cfg.getfloat(cfgsect, 'alpha', 1.0)
-        self.eta = self.cfg.getfloat(cfgsect, 'eta', 2.0)
-        self.epsilon = self.cfg.getfloat(cfgsect, 'epsilon', 30)
+        self.eta = self.cfg.getfloat(cfgsect, 'eta', 1e6)
         # Frequency that mf.csv should be updated
         self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
         self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
@@ -257,7 +255,6 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.bccomm = bccomm
 
         self.p = -1.0
-        self.dpdt = 0.0
         self.tprev = -1.0
 
         self.elemap_copy = elemap
@@ -426,25 +423,21 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     def avg_mf(self):
         return np.mean(self.mf_hist) if self.mf_hist else 0.0
     
-    def p_ode(self, y, avg_mf, target_mf):
-        p, dpdt = y
-        alpha = self.alpha
+    def p_ode(self, p, avg_mf, target_mf):
         eta = self.eta
-        epsilon = self.epsilon
-        d2pdt2 = (eta * (avg_mf - target_mf) - epsilon * dpdt) / alpha
-        return [dpdt, d2pdt2]
+        dpdt = eta * (1.0 - target_mf / avg_mf)
+        return dpdt
     
-    def p_rk4_step(self, dt, y, avg_mf, target_mf):
-        k1 = self.p_ode(y, avg_mf, target_mf)
-        k2 = self.p_ode([x0 + x1 * dt * 0.5 for x0, x1 in zip(y, k1)], avg_mf, target_mf)
-        k3 = self.p_ode([x0 + x1 * dt * 0.5 for x0, x1 in zip(y, k2)], avg_mf, target_mf)
-        k4 = self.p_ode([x0 + x1 * dt for x0, x1 in zip(y, k3)], avg_mf, target_mf)
-        return [x0 + (dt / 6.0) * (x1 + 2.0 * x2 + 2.0 * x3 + x4) for x0, x1, x2, x3, x4 in zip(y, k1, k2, k3, k4)]
-
+    def p_rk4_step(self, dt, p, avg_mf, target_mf):
+        k1 = self.p_ode(p, avg_mf, target_mf)
+        k2 = self.p_ode(p + k1 * dt * 0.5, avg_mf, target_mf)
+        k3 = self.p_ode(p + k2 * dt * 0.5, avg_mf, target_mf)
+        k4 = self.p_ode(p + k3 * dt, avg_mf, target_mf)
+        return p + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     def update_p(self, dt):
         avg_mf = self.avg_mf()
-        self.p, self.dpdt = self.p_rk4_step(dt, [self.p, self.dpdt], avg_mf, self.target_mass_flow_rate)
+        self.p = self.p_rk4_step(dt, self.p, avg_mf, self.target_mass_flow_rate)
     
     def prepare(self, t, system, soln):
         # Check if first prepare call
@@ -469,8 +462,6 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             system.update_kernel_extern('var_p', self.p)
             self.tprev = t
             # Output mass flow and pressure at outflow
-            # mass_flow = self.calculate_mass_flow(solns)
-            # p_force = self.calculate_p(solns)
             # Save values to CSV file
             if self.bccomm.rank == 0:
                 print(f'{t},{self.avg_mf()},{self.p}', file=self.outf)

@@ -113,6 +113,11 @@ class TavgPlugin(PostactionMixin, RegionMixin, TavgMixin, BaseSolnPlugin):
         # Reduce
         self.tpts = comm.reduce(tpts, op=mpi.SUM, root=root)
 
+        # Check if we are restarting and not before when tavg begins
+        if intg.isrestart and intg.tcurr >= self.tstart:
+            self._init_accumex(intg)
+            self._started = True
+
     def _prepare_exprs(self):
         cfg, cfgsect = self.cfg, self.cfgsect
         c = self.cfg.items_as('constants', float)

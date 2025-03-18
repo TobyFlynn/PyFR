@@ -228,7 +228,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         self.gamma = self.cfg.getfloat('constants', 'gamma')
-        self.avdr = self.cfg.getfloat('constants', 'avdr')
+        # Default to 1.0 AVDR for simulations that don't consider it
+        self.avdr = self.cfg.getfloat('constants', 'avdr', 1.0)
         # Name of inflow BC
         self.inflow_bc_name = self.cfg.get(cfgsect, 'inflow-name')
         # CpTt and Pt from inflow BC
@@ -251,6 +252,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
         self.nstep_counter = 0
         self.nflush_counter = 0
+        # Is this problem enclosed (i.e. no mass conservation issues)
+        self.enclosed = self.cfg.getint(cfgsect, 'enclosed', 0) == 1
         # MPI comm that only includes ranks that have this boundary
         self.bccomm = bccomm
 
@@ -317,12 +320,14 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     
     def set_target_mass_flow_rate(self, system, soln):
         # Get target mass flow rate which should set the target Mach number at the inflow
-        # Currently assumes that inflow area is the same as the outflow area
-        self.inflow_area = self.calculate_area(system, soln)
-        self.target_mass_flow_rate = self.inflow_area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
+        self.area = self.calculate_area(system, soln)
+        self.target_mass_flow_rate = self.area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
                                     * (self.pt / math.sqrt(self.cpTt)) * self.m \
                                     * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
-        self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0) * self.avdr
+        if self.enclosed:
+            self.target_mass_flow_rate = self.target_mass_flow_rate * self.avdr
+        else:
+            self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0) * self.avdr
 
     def calculate_area(self, system, soln):
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
@@ -414,7 +419,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             # Do the quadrature for each dimension
             fm[:ndims] += np.einsum('i...,ij,jik', qwts, p, norms)
         self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
-        return sum(fm) / self.inflow_area
+        return sum(fm) / self.area
     
     def update_mf(self, solns):
         mf = self.calculate_mass_flow(solns)

@@ -117,6 +117,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, TavgMixin, BaseSolnPlugin):
         if intg.isrestart and intg.tcurr >= self.tstart:
             self.tout_last = intg.tcurr
             self.init_tout_last = False
+        else:
+            self.init_tout_last = True
 
     def _prepare_exprs(self):
         cfg, cfgsect = self.cfg, self.cfgsect

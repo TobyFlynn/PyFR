@@ -228,19 +228,28 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         self.gamma = self.cfg.getfloat('constants', 'gamma')
-        # Default to 1.0 AVDR for simulations that don't consider it
-        self.avdr = self.cfg.getfloat('constants', 'avdr', 1.0)
-        # Name of inflow BC
-        self.inflow_bc_name = self.cfg.get(cfgsect, 'inflow-name')
-        # CpTt and Pt from inflow BC
-        self.cpTt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'cpTt')
-        self.pt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'pt')
-        # Inflow angle
-        self.inflow_angle = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'theta')
+        # Check if setting an explicit mass flow rate
+        try:
+            self.target_mass_flow_rate = self.cfg.getfloat('constants', 'mass-flow-rate')
+        except NoOptionError:
+            self.target_mass_flow_rate = None
+        # Info needed if calculating the mass flow rate for a specific Mach number
+        if self.target_mass_flow_rate is None:
+            # Default to 1.0 AVDR for simulations that don't consider it
+            self.avdr = self.cfg.getfloat('constants', 'avdr', 1.0)
+            # Name of inflow BC
+            self.inflow_bc_name = self.cfg.get(cfgsect, 'inflow-name')
+            # CpTt and Pt from inflow BC
+            self.cpTt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'cpTt')
+            self.pt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'pt')
+            # Inflow angle
+            self.inflow_angle = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'theta')
+            # Target Mach number
+            self.m = self.cfg.getfloat(cfgsect, 'm')
+            # Is this problem enclosed (i.e. no mass conservation issues)
+            self.enclosed = self.cfg.getint(cfgsect, 'enclosed', 0) == 1
         # Start p value
         self.start_p = self.cfg.getfloat(cfgsect, 'p')
-        # Target Mach number
-        self.m = self.cfg.getfloat(cfgsect, 'm')
         self.outlet_bc_name = cfgsect[9:]
         # Mass flow history
         self.mf_hist_len = 100
@@ -252,17 +261,14 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
         self.nstep_counter = 0
         self.nflush_counter = 0
-        # Is this problem enclosed (i.e. no mass conservation issues)
-        self.enclosed = self.cfg.getint(cfgsect, 'enclosed', 0) == 1
         # MPI comm that only includes ranks that have this boundary
         self.bccomm = bccomm
 
         self.p = -1.0
         self.tprev = -1.0
+        self.area = None
 
         self.elemap_copy = elemap
-
-        self.target_mass_flow_rate = None
 
         # Constants for Mako kernel
         self.c |= self._exp_opts(
@@ -321,13 +327,15 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     def set_target_mass_flow_rate(self, system, soln):
         # Get target mass flow rate which should set the target Mach number at the inflow
         self.area = self.calculate_area(system, soln)
-        self.target_mass_flow_rate = self.area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
-                                    * (self.pt / math.sqrt(self.cpTt)) * self.m \
-                                    * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
-        if self.enclosed:
-            self.target_mass_flow_rate = self.target_mass_flow_rate * self.avdr
-        else:
-            self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0) * self.avdr
+        # Check if the target mass flow rate has been set explicitly in config file
+        if self.target_mass_flow_rate is None:
+            self.target_mass_flow_rate = self.area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
+                                        * (self.pt / math.sqrt(self.cpTt)) * self.m \
+                                        * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
+            if self.enclosed:
+                self.target_mass_flow_rate = self.target_mass_flow_rate * self.avdr
+            else:
+                self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0) * self.avdr
 
     def calculate_area(self, system, soln):
         solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
@@ -446,7 +454,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
     
     def prepare(self, t, system, soln):
         # Check if first prepare call
-        if self.target_mass_flow_rate is None:
+        if self.area is None:
             self.ndims = system.ndims
             self.nvars = system.nvars
             self.elementscls, self._m0, self._qwts, self._eidxs, self._norms, self._rfpts = self.init_surface_integration(system, self.outlet_bc_name)
@@ -456,6 +464,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         if self.nstep_counter % self.nsteps == 0:
             solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
             self.update_mf(solns)
+            # First update to begin history
             if self.tprev < 0.0:
                 self.tprev = t
                 self.update_mf(solns)

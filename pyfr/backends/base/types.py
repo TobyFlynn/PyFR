@@ -209,7 +209,7 @@ class XchgMatrix(Matrix):
     def sendreq(self, pid, tag):
         comm, rank, root = get_comm_rank_root()
 
-        return autofree(comm.Send_init(self.hdata, pid, tag))
+        return autofree(comm.Send_init(self.hhdata, pid, tag))
 
 
 class View:

@@ -29,7 +29,7 @@ class CUDAPackingKernels(CUDAKernelProvider):
                         v.rstrides or 0, m)
 
         # If MPI is CUDA aware then we just need to pack the buffer
-        if self.backend.mpitype == 'cuda-aware':
+        if self.backend.mpitype == 'cuda-aware' and False:
             class PackXchgViewKernel(CUDAKernel):
                 def add_to_graph(self, graph, deps):
                     return graph.graph.add_kernel(params, deps)
@@ -42,7 +42,7 @@ class CUDAPackingKernels(CUDAKernelProvider):
                 def add_to_graph(self, graph, deps):
                     gpack = graph.graph.add_kernel(params, deps)
                     return graph.graph.add_memcpy(
-                        m.hdata, m.data, m.nbytes, [gpack]
+                        m.hhdata, m.data, m.nbytes, [gpack]
                     )
 
                 def run(self, stream):

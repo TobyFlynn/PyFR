@@ -76,6 +76,7 @@ class CUDAXchgMatrix(CUDAMatrix, base.XchgMatrix):
             shape = (self.nrow, self.ncol)
             self.hdata = backend.cuda.pagelocked_empty(shape, dtype)
         shape = (self.nrow, self.ncol)
+        self.hhdata = backend.cuda.pagelocked_empty(shape, dtype)
         self.hnandata = backend.cuda.pagelocked_empty(shape, dtype)
         self.hnandata.fill(np.nan)
 

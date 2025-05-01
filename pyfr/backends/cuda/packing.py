@@ -66,3 +66,38 @@ class CUDAPackingKernels(CUDAKernelProvider):
                     cuda.memcpy(mv.data, mv.hdata, mv.nbytes, stream)
 
             return UnpackXchgMatrixKernel(mats=[mv])
+
+    def clearnan(self, mv):
+        cuda = self.backend.cuda
+        ixdtype = self.backend.ixdtype
+
+        # An exchange view is simply a regular view plus an exchange matrix
+        m, v = mv.xchgmat, mv.view
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('clearnan').render()
+
+        # Build
+        kern = self._build_kernel('clearnan_view', src, [ixdtype]*3 + [np.uintp]*4)
+
+        # Compute the grid and thread-block size
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, v.n)
+
+        # Set the arguments
+        params = kern.make_params(grid, block)
+        params.set_args(v.n, v.nvrow, v.nvcol, v.basedata, v.mapping,
+                        v.rstrides or 0, m)
+
+        # If MPI is CUDA aware then we just need to pack the buffer
+        if self.backend.mpitype == 'cuda-aware':
+            class ClearXchgViewKernel(CUDAKernel):
+                def add_to_graph(self, graph, deps):
+                    return graph.graph.add_kernel(params, deps)
+
+                def run(self, stream):
+                    kern.exec_async(stream, params)
+            return ClearXchgViewKernel(mats=[mv])
+        # Otherwise, we need to both pack the buffer and copy it back
+        else:
+            return NullKernel()

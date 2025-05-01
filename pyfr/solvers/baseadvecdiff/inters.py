@@ -84,6 +84,9 @@ class BaseAdvectionDiffusionMPIInters(BaseAdvectionMPIInters):
             self.kernels['vect_fpts_unpack'] = lambda: be.kernel(
                 'unpack', self._vect_rhs
             )
+            self.kernels['vect_fpts_clearnan'] = lambda: be.kernel(
+                'clearnan', self._vect_rhs
+            )
 
         # Generate the additional kernels/views for artificial viscosity
         if cfg.get('solver', 'shock-capturing') == 'artificial-viscosity':
@@ -112,6 +115,9 @@ class BaseAdvectionDiffusionMPIInters(BaseAdvectionMPIInters):
                 )
                 self.kernels['artvisc_fpts_unpack'] = lambda: be.kernel(
                     'unpack', av_rhs
+                )
+                self.kernels['artvisc_fpts_clearnan'] = lambda: be.kernel(
+                    'clearnan', av_rhs
                 )
         else:
             self._artvisc_lhs = self._artvisc_rhs = None

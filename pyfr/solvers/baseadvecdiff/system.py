@@ -180,7 +180,14 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
 
         g3.commit()
 
-        return g1, g2, g3
+        g4 = self.backend.graph()
+        g4.add_all(k['mpiint/scal_fpts_clearnan'])
+        g4.add_all(k['mpiint/ent_fpts_clearnan'])
+        g4.add_all(k['mpiint/artvisc_fpts_clearnan'])
+        g4.add_all(k['mpiint/vect_fpts_clearnan'])
+        g4.commit()
+
+        return g1, g2, g3, g4
 
     @memoize
     def _compute_grads_graph(self, uinbank):
@@ -226,4 +233,8 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
             g2.add(l, deps=deps(l, 'eles/tgradcoru_upts'))
         g2.commit()
 
-        return g1, g2
+        g3 = self.backend.graph()
+        g3.add_all(k['mpiint/scal_fpts_clearnan'])
+        g3.commit()
+
+        return g1, g2, g3

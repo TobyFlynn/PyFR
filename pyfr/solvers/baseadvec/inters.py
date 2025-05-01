@@ -72,6 +72,9 @@ class BaseAdvectionMPIInters(BaseAdvectionIntersMixin, BaseInters):
         self.kernels['scal_fpts_unpack'] = lambda: be.kernel(
             'unpack', self._scal_rhs
         )
+        self.kernels['scal_fpts_clearnan'] = lambda: be.kernel(
+            'clearnan', self._scal_rhs
+        )
 
         # Associated MPI requests
         scal_fpts_tag = next(self._mpi_tag_counter)
@@ -93,6 +96,9 @@ class BaseAdvectionMPIInters(BaseAdvectionIntersMixin, BaseInters):
             )
             self.kernels['ent_fpts_unpack'] = lambda: be.kernel(
                 'unpack', self._entmin_rhs
+            )
+            self.kernels['ent_fpts_clearnan'] = lambda: be.kernel(
+                'clearnan', self._entmin_rhs
             )
 
             ent_fpts_tag = next(self._mpi_tag_counter)

@@ -464,6 +464,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
 
         # Check if past tstart
         if t < self.tstart:
+            system.update_kernel_extern('var_p', self.start_p)
             return
 
         if self.nstep_counter % self.nsteps == 0:

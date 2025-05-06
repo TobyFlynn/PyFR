@@ -228,6 +228,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         self.gamma = self.cfg.getfloat('constants', 'gamma')
+        self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
         # Check if setting an explicit mass flow rate
         try:
             self.target_mass_flow_rate = self.cfg.getfloat('constants', 'mass-flow-rate')
@@ -460,6 +461,10 @@ class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
             self.elementscls, self._m0, self._qwts, self._eidxs, self._norms, self._rfpts = self.init_surface_integration(system, self.outlet_bc_name)
             del self.elemap_copy
             self.set_target_mass_flow_rate(system, soln)
+
+        # Check if past tstart
+        if t < self.tstart:
+            return
 
         if self.nstep_counter % self.nsteps == 0:
             solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))

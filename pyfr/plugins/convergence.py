@@ -53,22 +53,22 @@ class ConvergencePlugin(BaseSolnPlugin):
         p1 = []
         pt1 = []
         with open(self.mp1File) as csvfile:
-        csvreader = csv.DictReader(csvfile)
-        for row in csvreader:
-            p, pt = self._get_mixed_out_from_int_vals(row)
-            _time = float(row['t'])
-            time.append(_time)
-            p1.append(p)
-            pt1.append(pt)
+            csvreader = csv.DictReader(csvfile)
+            for row in csvreader:
+                p, pt = self._get_mixed_out_from_int_vals(row)
+                _time = float(row['t'])
+                time.append(_time)
+                p1.append(p)
+                pt1.append(pt)
         # Load time series from MP2
         p2 = []
         pt2 = []
         with open(self.mp2File) as csvfile:
-        csvreader = csv.DictReader(csvfile)
-        for row in csvreader:
-            p, pt = self._get_mixed_out_from_int_vals(row)
-            p2.append(p)
-            pt2.append(pt)
+            csvreader = csv.DictReader(csvfile)
+            for row in csvreader:
+                p, pt = self._get_mixed_out_from_int_vals(row)
+                p2.append(p)
+                pt2.append(pt)
         # Calculate time series of objective function/exit angle
         objFun = []
         for i in range(0, len(time)):

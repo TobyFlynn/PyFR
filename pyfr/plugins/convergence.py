@@ -97,7 +97,7 @@ class ConvergencePlugin(BaseSolnPlugin):
         return min(range(len(mser_array)), key=mser_array.__getitem__)
     
     # Calculate 95% confidence interval (as a percentage)
-    def _calc_CI(array):
+    def _calc_CI(self, array):
         # Helper functions
         def mean_N(N, array):
             return sum(array[:N]) / N
@@ -156,7 +156,7 @@ class ConvergencePlugin(BaseSolnPlugin):
                 time = time[transientInd:]
 
                 # Get confidence interval on this
-                ci = self._calc_CI()
+                ci = self._calc_CI(objFun)
 
                 # Decide whether to terminate
                 if ci < self.ciTarget:

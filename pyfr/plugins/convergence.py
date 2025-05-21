@@ -14,6 +14,7 @@ class ConvergencePlugin(BaseSolnPlugin):
     def __init__(self, intg, cfgsect, suffix=None):
         super().__init__(intg, cfgsect, suffix)
 
+        self.gamma = self.cfg.getfloat('constants', 'gamma')
         self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
         self.dtcheck = self.cfg.getfloat(cfgsect, 'dt-check')
         self.tmax_transient = self.cfg.getfloat(cfgsect, 'tmax-transient')

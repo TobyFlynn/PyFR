@@ -14,6 +14,7 @@ class ConvergencePlugin(BaseSolnPlugin):
     def __init__(self, intg, cfgsect, suffix=None):
         super().__init__(intg, cfgsect, suffix)
 
+        self.tbegin = intg.tcurr
         self.gamma = self.cfg.getfloat('constants', 'gamma')
         self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
         self.dtcheck = self.cfg.getfloat(cfgsect, 'dt-check')
@@ -150,8 +151,16 @@ class ConvergencePlugin(BaseSolnPlugin):
                 # Get objective function as a time series
                 time, objFun = self._load_obj_time_series()
 
-                # Remove transient
+                # Calculate transient
                 transientInd = self._get_transient_ind(objFun, time, self.tmax_transient)
+                # Round up to flow pass (as TAvg files get output each flow pass)
+                transientTime = np.ceil((time[transientInd] - self.tbegin) / self.dtcheck) * self.dtcheck + self.tbegin
+                transientInd = 0
+                for i in range(0, len(time)):
+                    if time[i] > transientTime:
+                        transientInd = i
+                        break
+                # Remove transient
                 objFun = objFun[transientInd:]
                 time = time[transientInd:]
 
@@ -164,7 +173,10 @@ class ConvergencePlugin(BaseSolnPlugin):
                         f.write(f'Transient time: {time[0]}\n')
                         f.write(f'Mean: {sum(objFun) / len(objFun)}\n')
                         f.write(f'CI: {ci}\n')
+                        f.write(f'Current Time: {intg.tcurr}\n')
                     self._terminate_time = intg.tcurr + self.tTol
+            
+            self._terminate_time = comm.bcast(self._terminate_time, root=root)
         
         if self._terminate_time is not None:
             if self._terminate_time > intg.tcurr:

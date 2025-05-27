@@ -19,6 +19,7 @@ class ConvergencePlugin(BaseSolnPlugin):
         self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
         self.dtcheck = self.cfg.getfloat(cfgsect, 'dt-check')
         self.tmax_transient = self.cfg.getfloat(cfgsect, 'tmax-transient')
+        self.tmintavg = self.cfg.getfloat(cfgsect, 'tmintavg')
         self.ciTarget = self.cfg.getfloat(cfgsect, 'ci-target')
         self.tTol = self.cfg.getfloat(cfgsect, 'terminate-tol', 1e-7)
 
@@ -168,7 +169,7 @@ class ConvergencePlugin(BaseSolnPlugin):
                 ci = self._calc_CI(objFun)
 
                 # Decide whether to terminate
-                if ci < self.ciTarget:
+                if ci < self.ciTarget and (intg.tcurr - transientTime) > self.tmintavg:
                     with open(self.outFile, 'w') as f:
                         f.write(f'Transient time: {time[0]}\n')
                         f.write(f'Mean: {sum(objFun) / len(objFun)}\n')

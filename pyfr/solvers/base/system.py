@@ -9,7 +9,7 @@ from pyfr.backends.base import NullKernel
 from pyfr.cache import memoize
 from pyfr.shapes import BaseShape
 from pyfr.util import subclasses
-
+from pyfr.mpiutil import get_comm_rank_root, mpi
 
 class BaseSystem:
     elementscls = None
@@ -25,6 +25,7 @@ class BaseSystem:
         self.mesh = mesh
         self.cfg = cfg
         self.nregs = nregs
+        self.kernel_externs = {}
 
         # Conservative and physical variable names
         convars = self.elementscls.convars(mesh.ndims, cfg)
@@ -152,6 +153,17 @@ class BaseSystem:
         bccls = self.bbcinterscls
         bcmap = {b.type: b for b in subclasses(bccls, just_leaf=True)}
 
+        # Currently assumes there is only 1 mass flow BC
+        has_mass_flow_bc = False
+        for bname, interarr in mesh.bcon.items():
+            # Determine the config file section
+            cfgsect = f'soln-bcs-{bname}'
+            has_mass_flow_bc |= 'char-riem-inv-mass-flow' == self.cfg.get(cfgsect, 'type')
+        
+        # Create comm for ranks that have mass flow BC
+        comm, rank, root = get_comm_rank_root()
+        bcgroup = comm.Split(1 if has_mass_flow_bc else mpi.UNDEFINED)
+
         bc_inters = []
         for bname, interarr in mesh.bcon.items():
             # Determine the config file section
@@ -159,8 +171,12 @@ class BaseSystem:
 
             # Instantiate
             bcclass = bcmap[self.cfg.get(cfgsect, 'type')]
-            bciface = bcclass(self.backend, interarr, elemap, cfgsect,
-                                self.cfg)
+            if self.cfg.get(cfgsect, 'type') == 'char-riem-inv-mass-flow':
+                bciface = bcclass(self.backend, interarr, elemap, cfgsect,
+                                    self.cfg, bcgroup)
+            else:
+                bciface = bcclass(self.backend, interarr, elemap, cfgsect,
+                                    self.cfg)
             bc_inters.append(bciface)
 
         return bc_inters
@@ -245,13 +261,14 @@ class BaseSystem:
         return deps
 
     def _prepare_kernels(self, t, uinbank, foutbank):
+        self.update_kernel_extern('t', t)
         _, binders = self._get_kernels(uinbank, foutbank)
 
         for b in self._bc_inters:
-            b.prepare(t)
+            b.prepare(t, self, uinbank)
 
         for b in binders:
-            b(t=t)
+            b(**self.kernel_externs)
 
     def _rhs_graphs(self, uinbank, foutbank):
         pass
@@ -332,3 +349,6 @@ class BaseSystem:
     def set_ele_entmin_int(self, entmin_int):
         for e, em in zip(self.eles_entmin_int, entmin_int):
             e.set(em)
+    
+    def update_kernel_extern(self, key, value):
+        self.kernel_externs[key] = value

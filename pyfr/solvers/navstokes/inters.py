@@ -1,4 +1,10 @@
 import numpy as np
+import math
+from collections import defaultdict, deque
+from pyfr.quadrules import get_quadrule
+from pyfr.mpiutil import mpi
+from pyfr.inifile import NoOptionError
+from pyfr.plugins.base import init_csv
 
 from pyfr.solvers.baseadvecdiff import (BaseAdvectionDiffusionBCInters,
                                         BaseAdvectionDiffusionIntInters,
@@ -209,3 +215,297 @@ class NavierStokesSubOutflowBCInters(NavierStokesBaseBCInters):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         self.c |= self._exp_opts(['p'], lhs)
+
+# Boundary class that sets a mass flow across a boundary by varying
+# the static pressure
+class NavierStokesCharRiemInvMassFlowBCInters(NavierStokesBaseBCInters):
+    type = 'char-riem-inv-mass-flow'
+    cflux_state = 'ghost'
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
+
+        self.gamma = self.cfg.getfloat('constants', 'gamma')
+        self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
+        # Check if setting an explicit mass flow rate
+        try:
+            self.target_mass_flow_rate = self.cfg.getfloat('constants', 'mass-flow-rate')
+        except NoOptionError:
+            self.target_mass_flow_rate = None
+        # Info needed if calculating the mass flow rate for a specific Mach number
+        if self.target_mass_flow_rate is None:
+            # Default to 1.0 AVDR for simulations that don't consider it
+            self.avdr = self.cfg.getfloat('constants', 'avdr', 1.0)
+            # Name of inflow BC
+            self.inflow_bc_name = self.cfg.get(cfgsect, 'inflow-name')
+            # CpTt and Pt from inflow BC
+            self.cpTt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'cpTt')
+            self.pt = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'pt')
+            # Inflow angle
+            self.inflow_angle = self.cfg.getfloat('soln-bcs-' + self.inflow_bc_name, 'theta')
+            # Target Mach number
+            self.m = self.cfg.getfloat(cfgsect, 'm')
+            # Is this problem enclosed (i.e. no mass conservation issues)
+            self.enclosed = self.cfg.getint(cfgsect, 'enclosed', 0) == 1
+        # Start p value
+        self.start_p = self.cfg.getfloat(cfgsect, 'p')
+        self.outlet_bc_name = cfgsect[9:]
+        # Mass flow history
+        self.mf_hist_len = 100
+        self.mf_hist = deque(maxlen=self.mf_hist_len)
+        # Values for ODE
+        self.eta = self.cfg.getfloat(cfgsect, 'eta', 1e6)
+        # Frequency that mf.csv should be updated
+        self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
+        self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
+        self.nstep_counter = 0
+        self.nflush_counter = 0
+        # MPI comm that only includes ranks that have this boundary
+        self.bccomm = bccomm
+
+        self.p = -1.0
+        self.tprev = -1.0
+        self.area = None
+
+        self.elemap_copy = elemap
+
+        # Constants for Mako kernel
+        self.c |= self._exp_opts(
+            ['rho', 'u', 'v', 'w'][:self.ndims + 2], lhs
+        )
+
+        self._set_external('var_p', 'scalar fpdtype_t')
+
+        if self.bccomm.rank == 0:
+            self.outf = init_csv(self.cfg, cfgsect, 't,mf,pbc')
+    
+    # Setup integrating over boundary
+    def init_surface_integration(self, system, bc_name):
+        # Underlying elements class
+        elementscls = system.elementscls
+        # Get the mesh and elements
+        mesh, elemap = system.mesh, self.elemap_copy
+        # Interpolation matrices and quadrature weights
+        _m0 = m0 = {}
+        _qwts = qwts = defaultdict(list)
+        _eidxs = None
+        _norms = None
+        _rfpts = None
+        # If we have the boundary then process the interface
+        if bc_name in mesh.bcon:
+            # Element indices, associated face normals and relative flux
+            # points position with respect to the moments origin
+            eidxs = defaultdict(list)
+            norms = defaultdict(list)
+            rfpts = defaultdict(list)
+
+            for etype, eidx, fidx in mesh.bcon[bc_name]:
+                eles = elemap[etype]
+                itype, proj, norm = eles.basis.faces[fidx]
+
+                ppts, pwts = self._surf_quad(itype, proj, flags='s')
+                nppts = len(ppts)
+
+                # Get phyical normals
+                pnorm = eles.pnorm_at(ppts, [norm]*nppts)[:, eidx]
+
+                eidxs[etype, fidx].append(eidx)
+                norms[etype, fidx].append(pnorm)
+
+                if (etype, fidx) not in m0:
+                    m0[etype, fidx] = eles.basis.ubasis.nodal_basis_at(ppts)
+                    qwts[etype, fidx] = pwts
+
+            _eidxs = {k: np.array(v) for k, v in eidxs.items()}
+            _norms = {k: np.array(v) for k, v in norms.items()}
+            _rfpts = {k: np.array(v) for k, v in rfpts.items()}
+        return elementscls, _m0, _qwts, _eidxs, _norms, _rfpts
+    
+    def set_target_mass_flow_rate(self, system, soln):
+        # Get target mass flow rate which should set the target Mach number at the inflow
+        self.area = self.calculate_area(system, soln)
+        # Check if the target mass flow rate has been set explicitly in config file
+        if self.target_mass_flow_rate is None:
+            self.target_mass_flow_rate = self.area * (self.gamma / math.sqrt(self.gamma - 1.0)) \
+                                        * (self.pt / math.sqrt(self.cpTt)) * self.m \
+                                        * math.pow(1.0 + ((self.gamma - 1.0) / 2.0) * (self.m**2), (-self.gamma -1.0) / (2.0 * (self.gamma - 1.0)))
+            if self.enclosed:
+                self.target_mass_flow_rate = self.target_mass_flow_rate * self.avdr
+            else:
+                self.target_mass_flow_rate = self.target_mass_flow_rate * np.cos(self.inflow_angle * np.pi / 180.0) * self.avdr
+
+    def calculate_area(self, system, soln):
+        solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
+        ndims, nvars = self.ndims, self.nvars
+        sol_sizes = {}
+        # Get the sizes for the area calculation
+        for etype, fidx in self._m0:
+            # Get the interpolation operator
+            m0 = self._m0[etype, fidx]
+            nfpts, nupts = m0.shape
+
+            # Extract the relevant elements from the solution
+            uupts = solns[etype][..., self._eidxs[etype, fidx]]
+
+            # Interpolate to the face
+            ufpts = m0 @ uupts.reshape(nupts, -1)
+            ufpts = ufpts.reshape(nfpts, nvars, -1)
+            ufpts = ufpts.swapaxes(0, 1)
+
+            # Compute the pressure
+            p = self.elementscls.con_to_pri(ufpts, self.cfg)[-1]
+            sol_sizes[etype, fidx] = p.shape
+        fm = np.zeros((ndims))
+        # Get the sizes for the area calculation
+        for etype, fidx in self._m0:
+            # Array with ones so we can get area
+            area_ones = np.ones(sol_sizes[etype, fidx])
+
+            # Get the quadrature weights and normal vectors
+            qwts = self._qwts[etype, fidx]
+            norms = self._norms[etype, fidx]
+
+            # Do the quadrature
+            fm[:ndims] += np.einsum('i...,ij,jik', qwts, area_ones, norms)
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return abs(sum(fm))
+    
+    def calculate_mass_flow(self, solns):
+        ndims, nvars = self.ndims, self.nvars
+        fm = np.zeros((ndims))
+        # Get the sizes for the area calculation
+        for etype, fidx in self._m0:
+            # Get the interpolation operator
+            m0 = self._m0[etype, fidx]
+            nfpts, nupts = m0.shape
+
+            # Extract the relevant elements from the solution
+            uupts = solns[etype][..., self._eidxs[etype, fidx]]
+
+            # Interpolate to the face
+            ufpts = m0 @ uupts.reshape(nupts, -1)
+            ufpts = ufpts.reshape(nfpts, nvars, -1)
+            ufpts = ufpts.swapaxes(0, 1)
+
+            # Get the quadrature weights and normal vectors
+            qwts = self._qwts[etype, fidx]
+            norms = self._norms[etype, fidx]
+
+            # Do the quadrature for each dimension
+            # RhoU = ufpts[1], RhoV = ufpts[2], RhoW = ufpts[2]
+            for i in range(0, ndims):
+                rhoVel = ufpts[1 + i]
+                fm[i] += np.einsum('i...,ij,ji', qwts, rhoVel, norms[:,:,i])
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return sum(fm)
+    
+    def calculate_p(self, solns):
+        ndims, nvars = self.ndims, self.nvars
+        fm = np.zeros((ndims))
+        # Get the sizes for the area calculation
+        for etype, fidx in self._m0:
+            # Get the interpolation operator
+            m0 = self._m0[etype, fidx]
+            nfpts, nupts = m0.shape
+
+            # Extract the relevant elements from the solution
+            uupts = solns[etype][..., self._eidxs[etype, fidx]]
+
+            # Interpolate to the face
+            ufpts = m0 @ uupts.reshape(nupts, -1)
+            ufpts = ufpts.reshape(nfpts, nvars, -1)
+            ufpts = ufpts.swapaxes(0, 1)
+            p = self.elementscls.con_to_pri(ufpts, self.cfg)[-1]
+
+            # Get the quadrature weights and normal vectors
+            qwts = self._qwts[etype, fidx]
+            norms = self._norms[etype, fidx]
+
+            # Do the quadrature for each dimension
+            fm[:ndims] += np.einsum('i...,ij,jik', qwts, p, norms)
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return sum(fm) / self.area
+    
+    def update_mf(self, solns):
+        mf = self.calculate_mass_flow(solns)
+        self.mf_hist.append(mf)
+    
+    def avg_mf(self):
+        return np.mean(self.mf_hist) if self.mf_hist else 0.0
+    
+    def p_ode(self, p, avg_mf, target_mf):
+        eta = self.eta
+        dpdt = eta * (1.0 - target_mf / avg_mf)
+        return dpdt
+    
+    def p_rk4_step(self, dt, p, avg_mf, target_mf):
+        k1 = self.p_ode(p, avg_mf, target_mf)
+        k2 = self.p_ode(p + k1 * dt * 0.5, avg_mf, target_mf)
+        k3 = self.p_ode(p + k2 * dt * 0.5, avg_mf, target_mf)
+        k4 = self.p_ode(p + k3 * dt, avg_mf, target_mf)
+        return p + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    def update_p(self, dt):
+        avg_mf = self.avg_mf()
+        self.p = self.p_rk4_step(dt, self.p, avg_mf, self.target_mass_flow_rate)
+    
+    def prepare(self, t, system, soln):
+        # Check if first prepare call
+        if self.area is None:
+            self.ndims = system.ndims
+            self.nvars = system.nvars
+            self.elementscls, self._m0, self._qwts, self._eidxs, self._norms, self._rfpts = self.init_surface_integration(system, self.outlet_bc_name)
+            del self.elemap_copy
+            self.set_target_mass_flow_rate(system, soln)
+
+        # Check if past tstart
+        if t < self.tstart:
+            system.update_kernel_extern('var_p', self.start_p)
+            return
+
+        if self.nstep_counter % self.nsteps == 0:
+            solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
+            self.update_mf(solns)
+            # First update to begin history
+            if self.tprev < 0.0:
+                self.tprev = t
+                self.update_mf(solns)
+                self.p = self.start_p
+                system.update_kernel_extern('var_p', self.p)
+                return
+
+            self.update_p(t - self.tprev)
+            system.update_kernel_extern('var_p', self.p)
+            self.tprev = t
+            # Output mass flow and pressure at outflow
+            # Save values to CSV file
+            if self.bccomm.rank == 0:
+                print(f'{t},{self.avg_mf()},{self.p}', file=self.outf)
+            self.nflush_counter = self.nflush_counter + 1
+        else:
+            system.update_kernel_extern('var_p', self.p)
+
+        # Flush to file
+        if self.nflush_counter % self.nflush == 0:
+            if self.bccomm.rank == 0:
+                self.outf.flush()
+        self.nstep_counter = self.nstep_counter + 1
+    
+    # Copied from plugins/base.py:SurfaceMixin
+    def _surf_quad(self, itype, proj, flags=''):
+        # Obtain quadrature info
+        rname = self.cfg.get(f'solver-interfaces-{itype}', 'flux-pts')
+
+        # Quadrature rule (default to that of the solution points)
+        qrule = self.cfg.get(self.cfgsect, f'quad-pts-{itype}', rname)
+        try:
+            qdeg = self.cfg.getint(self.cfgsect, f'quad-deg-{itype}')
+        except NoOptionError:
+            qdeg = self.cfg.getint(self.cfgsect, 'quad-deg')
+
+        # Get the quadrature rule
+        q = get_quadrule(itype, qrule, qdeg=qdeg, flags=flags)
+
+        # Project its points onto the provided surface
+        pts = np.atleast_2d(q.pts.T)
+        return np.vstack(np.broadcast_arrays(*proj(*pts))).T, q.wts

@@ -72,8 +72,13 @@ class BaseAdvectionElements(BaseElements):
         fluxaa = 'flux' in self.antialias
 
         # Interpolation from elemental points
-        kernels['disu'] = lambda uin: self._be.kernel(
-            'mul', self.opmat('M0'), self.scal_upts[uin],
+        # MPI elements are treated as if they are curved
+        kernels['disu_mpi'] = lambda uin: self._be.kernel(
+            'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'curved'),
+            out=self._scal_fpts
+        )
+        kernels['disu_core'] = lambda uin: self._be.kernel(
+            'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'linear'),
             out=self._scal_fpts
         )
 

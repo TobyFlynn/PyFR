@@ -19,11 +19,13 @@ class BaseAdvectionSystem(BaseSystem):
         g1.add_all(k['eles/entropy_filter'])
 
         # Interpolate the solution to the flux points
-        for l in k['eles/disu']:
+        for l in k['eles/disu_mpi']:
+            g1.add(l, deps=deps(l, 'eles/entropy_filter'))
+        for l in k['eles/disu_core']:
             g1.add(l, deps=deps(l, 'eles/entropy_filter'))
 
         # Pack and send these interpolated solutions to our neighbours
-        g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu'])
+        g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu_mpi'])
         for send, pack in zip(m['scal_fpts_send'], k['mpiint/scal_fpts_pack']):
             g1.add_mpi_req(send, deps=[pack])
 
@@ -36,13 +38,15 @@ class BaseAdvectionSystem(BaseSystem):
         g1.add_all(k['iint/comm_entropy'],
                    deps=k['eles/entropy_filter'] + k['mpiint/ent_fpts_pack'])
         g1.add_all(k['bcint/comm_entropy'],
-                   deps=k['eles/disu'])
+                   deps=k['eles/disu_mpi'] + k['eles/disu_core'])
 
         # Compute the common normal flux at our internal/boundary interfaces
         g1.add_all(k['iint/comm_flux'],
-                   deps=k['eles/disu'] + k['mpiint/scal_fpts_pack'])
+                   deps=k['eles/disu_mpi'] + k['eles/disu_core'] 
+                   + k['mpiint/scal_fpts_pack'])
         g1.add_all(k['bcint/comm_flux'],
-                   deps=k['eles/disu'] + k['bcint/comm_entropy'])
+                   deps=k['eles/disu_mpi'] + k['eles/disu_core'] 
+                   + k['bcint/comm_entropy'])
 
         # Make a copy of the solution (if used by source terms)
         g1.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])
@@ -111,7 +115,8 @@ class BaseAdvectionSystem(BaseSystem):
 
         # Interpolate the solution to the flux points
         if 'eles/local_entropy' in k:
-            g1.add_all(k['eles/disu'], deps=k['eles/entropy_filter'])
+            g1.add_all(k['eles/disu_mpi'], deps=k['eles/entropy_filter'])
+            g1.add_all(k['eles/disu_core'], deps=k['eles/entropy_filter'])
 
         # Compute local minimum entropy within element
         g1.add_all(k['eles/local_entropy'], deps=k['eles/entropy_filter'])
@@ -124,7 +129,8 @@ class BaseAdvectionSystem(BaseSystem):
         # Compute common entropy minima at internal/boundary interfaces
         g1.add_all(k['iint/comm_entropy'], deps=k['eles/local_entropy'])
         g1.add_all(k['bcint/comm_entropy'],
-                   deps=k['eles/local_entropy'] + k['eles/disu'])
+                   deps=k['eles/local_entropy'] + k['eles/disu_mpi'] 
+                   + k['eles/disu_core'])
         g1.commit()
 
         if 'mpiint/comm_entropy' in k:

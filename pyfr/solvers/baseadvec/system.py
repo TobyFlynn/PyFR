@@ -83,11 +83,11 @@ class BaseAdvectionSystem(BaseSystem):
 
         kgroup = [k['eles/qptsu'], k['eles/tdisf'], k['eles/tdivtpcorf'],
                   k['eles/tdivtconf'], k['eles/negdivconf']]
-        for ks in zip_longest(*kgroup):
-            self._group(g2, ks, subs=[
-                [(ks[0], 'out'), (ks[1], 'u')],
-                [(ks[1], 'f'), (ks[2], 'b')],
-            ])
+        # for ks in zip_longest(*kgroup):
+        #     self._group(g2, ks, subs=[
+        #         [(ks[0], 'out'), (ks[1], 'u')],
+        #         [(ks[1], 'f'), (ks[2], 'b')],
+        #     ])
 
         g2.commit()
 

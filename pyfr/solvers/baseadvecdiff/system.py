@@ -124,36 +124,36 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         for l in k['eles/tdivtpcorf']:
             g2.add(l, deps=deps(l, 'eles/tdisf', 'eles/tdisf_fused'))
 
-        kgroup = [
-            k['eles/tgradpcoru_upts'], k['eles/tgradcoru_upts'],
-            k['eles/gradcoru_upts'], k['eles/tdisf_fused'],
-            k['eles/gradcoru_fpts'], k['eles/gradcoru_qpts'],
-            k['eles/qptsu'], k['eles/tdisf'], k['eles/tdivtpcorf']
-        ]
-        for ks in zip_longest(*kgroup):
-            # Flux-AA on; inputs to tdisf and tdivtpcorf are from quad pts
-            if k['eles/qptsu']:
-                subs = [
-                    [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
-                     (ks[4], 'b'), (ks[5], 'b')],
-                    [(ks[6], 'out'), (ks[7], 'u')],
-                    [(ks[5], 'out'), (ks[7], 'f'), (ks[8], 'b')],
-                ]
-            # Gradient fusion on; tdisf_fused replaces tdisf and gradcoru_upts
-            elif k['eles/tdisf_fused']:
-                subs = [
-                    [(ks[0], 'out'), (ks[1], 'out'),
-                     (ks[3], 'gradu'), (ks[4], 'b')],
-                    [(ks[3], 'f'), (ks[8], 'b')],
-                ]
-            # No flux-AA and no gradient fusion
-            else:
-                subs = [
-                    [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
-                     (ks[4], 'b'), (ks[7], 'f'), (ks[8], 'b')],
-                ]
+        # kgroup = [
+        #     k['eles/tgradpcoru_upts'], k['eles/tgradcoru_upts'],
+        #     k['eles/gradcoru_upts'], k['eles/tdisf_fused'],
+        #     k['eles/gradcoru_fpts'], k['eles/gradcoru_qpts'],
+        #     k['eles/qptsu'], k['eles/tdisf'], k['eles/tdivtpcorf']
+        # ]
+        # for ks in zip_longest(*kgroup):
+        #     # Flux-AA on; inputs to tdisf and tdivtpcorf are from quad pts
+        #     if k['eles/qptsu']:
+        #         subs = [
+        #             [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
+        #              (ks[4], 'b'), (ks[5], 'b')],
+        #             [(ks[6], 'out'), (ks[7], 'u')],
+        #             [(ks[5], 'out'), (ks[7], 'f'), (ks[8], 'b')],
+        #         ]
+        #     # Gradient fusion on; tdisf_fused replaces tdisf and gradcoru_upts
+        #     elif k['eles/tdisf_fused']:
+        #         subs = [
+        #             [(ks[0], 'out'), (ks[1], 'out'),
+        #              (ks[3], 'gradu'), (ks[4], 'b')],
+        #             [(ks[3], 'f'), (ks[8], 'b')],
+        #         ]
+        #     # No flux-AA and no gradient fusion
+        #     else:
+        #         subs = [
+        #             [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
+        #              (ks[4], 'b'), (ks[7], 'f'), (ks[8], 'b')],
+        #         ]
 
-            self._group(g2, ks, subs=subs)
+        #     self._group(g2, ks, subs=subs)
 
         g2.commit()
 
@@ -175,8 +175,8 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
             g3.add(l, deps=deps(l, 'eles/tdivtconf'))
 
         # Group tdivtconf and negdivconf kernels
-        for k1, k2 in zip_longest(k['eles/tdivtconf'], k['eles/negdivconf']):
-            self._group(g3, [k1, k2])
+        # for k1, k2 in zip_longest(k['eles/tdivtconf'], k['eles/negdivconf']):
+        #     self._group(g3, [k1, k2])
 
         g3.commit()
 

@@ -16,7 +16,7 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g1.add_mpi_reqs(m['scal_fpts_recv'] + m['ent_fpts_recv'])
 
         # Perform post-processing of the previous solution stage
-         g1.add_all(k['eles/entropy_filter_mpi'])
+        g1.add_all(k['eles/entropy_filter_mpi'])
         g1.add_all(k['eles/entropy_filter_core'])
 
         # Interpolate the solution to the flux points

@@ -109,6 +109,9 @@ class BaseFluidElements:
                 'pyfr.solvers.euler.kernels.entropyfilter'
             )
 
+            # Mesh regions
+            regions = self._mesh_regions
+
             # Template arguments
             fpts_in_upts = self.basis.fpts_in_upts
             self.nefpts = self.nupts if fpts_in_upts else self.nupts + self.nfpts
@@ -166,6 +169,20 @@ class BaseFluidElements:
             self.kernels['entropy_filter'] = lambda uin: self._be.kernel(
                 'entropyfilter', tplargs=eftplargs, dims=[self.neles],
                 u=self.scal_upts[uin], entmin_int=self.entmin_int,
+                vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
+            )
+            # Check if there is an MPI region (elements that are in an MPI buffer)
+            if 'mpi' in regions:
+                self.kernels['entropy_filter_mpi'] = lambda uin: self._be.kernel(
+                    'entropyfilter', tplargs=eftplargs, dims=[regions['mpi']],
+                    u=self._slice_mat(self.scal_upts[uin], 'mpi'), 
+                    entmin_int=self._slice_mat(self.entmin_int, 'mpi'),
+                    vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
+                )
+            self.kernels['entropy_filter_core'] = lambda uin: self._be.kernel(
+                'entropyfilter', tplargs=eftplargs, dims=[regions['core']],
+                u=self._slice_mat(self.scal_upts[uin], 'core'), 
+                entmin_int=self._slice_mat(self.entmin_int, 'core'),
                 vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
             )
 

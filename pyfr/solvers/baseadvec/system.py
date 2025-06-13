@@ -16,13 +16,14 @@ class BaseAdvectionSystem(BaseSystem):
         g1.add_mpi_reqs(m['scal_fpts_recv'] + m['ent_fpts_recv'])
 
         # Perform post-processing of the previous solution stage
-        g1.add_all(k['eles/entropy_filter'])
+        g1.add_all(k['eles/entropy_filter_mpi'])
+        g1.add_all(k['eles/entropy_filter_core'])
 
         # Interpolate the solution to the flux points
         for l in k['eles/disu_mpi']:
-            g1.add(l, deps=deps(l, 'eles/entropy_filter'))
+            g1.add(l, deps=deps(l, 'eles/entropy_filter_mpi'))
         for l in k['eles/disu_core']:
-            g1.add(l, deps=deps(l, 'eles/entropy_filter'))
+            g1.add(l, deps=deps(l, 'eles/entropy_filter_core'))
 
         # Pack and send these interpolated solutions to our neighbours
         g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu_mpi'])
@@ -30,13 +31,13 @@ class BaseAdvectionSystem(BaseSystem):
             g1.add_mpi_req(send, deps=[pack])
 
         # If entropy filtering, pack and send the entropy values to neighbours
-        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/entropy_filter'])
+        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/entropy_filter_mpi'])
         for send, pack in zip(m['ent_fpts_send'], k['mpiint/ent_fpts_pack']):
             g1.add_mpi_req(send, deps=[pack])
 
         # Compute common entropy minima at internal/boundary interfaces
         g1.add_all(k['iint/comm_entropy'],
-                   deps=k['eles/entropy_filter'] + k['mpiint/ent_fpts_pack'])
+                   deps=k['eles/entropy_filter_core'] + k['mpiint/ent_fpts_pack'])
         g1.add_all(k['bcint/comm_entropy'],
                    deps=k['eles/disu_mpi'] + k['eles/disu_core'])
 
@@ -49,7 +50,8 @@ class BaseAdvectionSystem(BaseSystem):
                    + k['bcint/comm_entropy'])
 
         # Make a copy of the solution (if used by source terms)
-        g1.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])
+        g1.add_all(k['eles/copy_soln'], 
+                   deps=k['eles/entropy_filter_mpi'] + k['eles/entropy_filter_core'])
 
         g1.commit()
 

@@ -16,11 +16,12 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g1.add_mpi_reqs(m['scal_fpts_recv'] + m['ent_fpts_recv'])
 
         # Perform post-processing of the previous solution stage
-        g1.add_all(k['eles/entropy_filter'])
+         g1.add_all(k['eles/entropy_filter_mpi'])
+        g1.add_all(k['eles/entropy_filter_core'])
 
         # Interpolate the solution to the flux points
-        g1.add_all(k['eles/disu_mpi'], deps=k['eles/entropy_filter'])
-        g1.add_all(k['eles/disu_core'], deps=k['eles/entropy_filter'])
+        g1.add_all(k['eles/disu_mpi'], deps=k['eles/entropy_filter_mpi'])
+        g1.add_all(k['eles/disu_core'], deps=k['eles/entropy_filter_core'])
 
         # Pack and send these interpolated solutions to our neighbours
         g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu_mpi'])
@@ -28,18 +29,19 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
             g1.add_mpi_req(send, deps=[pack])
 
         # If entropy filtering, pack and send the entropy values to neighbours
-        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/entropy_filter'])
+        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/entropy_filter_mpi'])
         for send, pack in zip(m['ent_fpts_send'], k['mpiint/ent_fpts_pack']):
             g1.add_mpi_req(send, deps=[pack])
 
         # Compute common entropy minima at internal/boundary interfaces
         g1.add_all(k['iint/comm_entropy'],
-                   deps=k['eles/entropy_filter'] + k['mpiint/ent_fpts_pack'])
+                   deps=k['eles/entropy_filter_core'] + k['mpiint/ent_fpts_pack'])
         g1.add_all(k['bcint/comm_entropy'],
                    deps=k['eles/disu_mpi'] + k['eles/disu_core'])
 
         # Make a copy of the solution (if used by source terms)
-        g1.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])
+        g1.add_all(k['eles/copy_soln'], 
+                   deps=k['eles/entropy_filter_mpi'] + k['eles/entropy_filter_core'])
 
         # Compute the common solution at our internal/boundary interfaces
         for l in k['eles/copy_fpts']:
@@ -194,18 +196,17 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g1.add_mpi_reqs(m['scal_fpts_recv'])
 
         # Interpolate the solution to the flux points
-        g1.add_all(k['eles/disu_mpi'])
-        g1.add_all(k['eles/disu_core'])
+        g1.add_all(k['eles/disu'])
 
         # Pack and send these interpolated solutions to our neighbours
-        g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu_mpi'])
+        g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu'])
         for send, pack in zip(m['scal_fpts_send'], k['mpiint/scal_fpts_pack']):
             g1.add_mpi_req(send, deps=[pack])
 
         # Compute the common solution at our internal/boundary interfaces
         for l in k['eles/copy_fpts']:
-            g1.add(l, deps=deps(l, 'eles/disu_mpi', 'eles/disu_core'))
-        kdeps = k['eles/copy_fpts'] or k['eles/disu_mpi'] + k['eles/disu_core']
+            g1.add(l, deps=deps(l, 'eles/disu'))
+        kdeps = k['eles/copy_fpts'] or k['eles/disu']
         g1.add_all(k['iint/con_u'], deps=kdeps)
         g1.add_all(k['bcint/con_u'], deps=kdeps)
 

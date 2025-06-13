@@ -18,8 +18,8 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
 
         return bufs
 
-    def set_backend(self, backend, nscalupts, nonce, linoff):
-        super().set_backend(backend, nscalupts, nonce, linoff)
+    def set_backend(self, backend, nscalupts, nonce, linoff, coff):
+        super().set_backend(backend, nscalupts, nonce, linoff, coff)
 
         kernel, kernels = self._be.kernel, self.kernels
         kprefix = 'pyfr.solvers.baseadvecdiff.kernels'

@@ -54,8 +54,8 @@ class BaseAdvectionElements(BaseElements):
         if value is not None:
             self._external_vals[name] = value
 
-    def set_backend(self, backend, nscalupts, nonce, linoff):
-        super().set_backend(backend, nscalupts, nonce, linoff)
+    def set_backend(self, backend, nscalupts, nonce, linoff, coff):
+        super().set_backend(backend, nscalupts, nonce, linoff, coff)
 
         kernels = self.kernels
 
@@ -68,18 +68,27 @@ class BaseAdvectionElements(BaseElements):
             'pyfr.solvers.baseadvec.kernels.evalsrcmacros'
         )
 
+        # Mesh regions
+        regions = self._mesh_regions
+
         # What anti-aliasing options we're running with
         fluxaa = 'flux' in self.antialias
 
         # Interpolation from elemental points
-        # MPI elements are treated as if they are curved
-        kernels['disu_mpi'] = lambda uin: self._be.kernel(
-            'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'curved'),
+        kernels['disu'] = lambda uin: self._be.kernel(
+            'mul', self.opmat('M0'), self.scal_upts[uin],
             out=self._scal_fpts
         )
+        # Check if there is an MPI region (elements that are in an MPI buffer)
+        if 'mpi' in regions:
+            kernels['disu_mpi'] = lambda uin: self._be.kernel(
+                'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'mpi'),
+                out=self._slice_mat(self._scal_fpts, 'mpi')
+            )
+        # Always a core region
         kernels['disu_core'] = lambda uin: self._be.kernel(
-            'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'linear'),
-            out=self._scal_fpts
+            'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'core'),
+            out=self._slice_mat(self._scal_fpts, 'core')
         )
 
         if fluxaa and self.basis.order > 0:

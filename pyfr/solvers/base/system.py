@@ -124,12 +124,18 @@ class BaseSystem:
             for ele in eles:
                 ele.set_ics_from_cfg()
 
+        # Calculate core start (first element not in MPI buffers)
+        cidx = {etype: 0 for etype, ele in elemap.items()}
+        for p, con in mesh.con_p.items():
+            for etype, eidx, fidx in con:
+                cidx[etype] = max(cidx[etype], eidx + 1)
+
         # Allocate these elements on the backend
         for etype, ele in elemap.items():
             curved = mesh.spts_curved[etype]
             linoff = np.max(*np.nonzero(curved), initial=-1) + 1
 
-            ele.set_backend(self.backend, nregs, nonce, linoff)
+            ele.set_backend(self.backend, nregs, nonce, linoff, cidx[etype])
 
         return eles, elemap
 

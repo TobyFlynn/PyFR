@@ -153,19 +153,29 @@ class BaseElements:
 
         # No curved elements
         if off == 0:
-            return {'linear': self.neles}
+            regions = {'linear': self.neles}
         # All curved elements
         elif off >= self.neles:
-            return {'curved': self.neles}
+            regions = {'curved': self.neles}
         # Mix of curved and linear elements
         else:
-            return {'curved': off, 'linear': self.neles - off}
+            regions = {'curved': off, 'linear': self.neles - off}
+        
+        if self._coreoff == 0:
+            regions['core'] = self.neles
+        else:
+            regions['core'] = self.neles - self._coreoff
+            regions['mpi']  = self._coreoff
+        
+        return regions
 
     def _slice_mat(self, mat, region, ra=None, rb=None):
         if mat is None:
             return None
 
         off = self._linoff
+        if region in ['core', 'mpi']:
+            off = self._coreoff
 
         # Handle stacked matrices
         if len(mat.ioshape) >= 3:
@@ -173,9 +183,9 @@ class BaseElements:
         else:
             off = min(off, mat.ncol)
 
-        if region == 'curved':
+        if region in ['curved', 'mpi']:
             return mat.slice(ra, rb, 0, off)
-        elif region == 'linear':
+        elif region in ['linear', 'core']:
             return mat.slice(ra, rb, off, mat.ncol)
         else:
             raise ValueError('Invalid slice region')
@@ -188,8 +198,9 @@ class BaseElements:
         else:
             return klist[0]
 
-    def set_backend(self, backend, nscalupts, nonce, linoff):
+    def set_backend(self, backend, nscalupts, nonce, linoff, coff):
         self._be = backend
+        self._coreoff = coff - coff % -backend.csubsz
 
         # If we are doing gradient fusion
         self.grad_fusion = not (self._be.blocks or 'flux' in self.antialias)

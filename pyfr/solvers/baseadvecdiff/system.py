@@ -15,23 +15,31 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g1 = self.backend.graph()
         g1.add_mpi_reqs(m['scal_fpts_recv'] + m['ent_fpts_recv'])
 
+        # On elements involved with MPI exchanges:
         # Perform post-processing of the previous solution stage
         g1.add_all(k['eles/entropy_filter_mpi'])
-        g1.add_all(k['eles/entropy_filter_core'])
+
+        # If entropy filtering, pack and send the entropy values to neighbours
+        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/entropy_filter_mpi'])
+        for send, pack in zip(m['ent_fpts_send'], k['mpiint/ent_fpts_pack']):
+            g1.add_mpi_req(send, deps=[pack])
 
         # Interpolate the solution to the flux points
-        g1.add_all(k['eles/disu_mpi'], deps=k['eles/entropy_filter_mpi'])
-        g1.add_all(k['eles/disu_core'], deps=k['eles/entropy_filter_core'])
+        for l in k['eles/disu_mpi']:
+            g1.add(l, deps=deps(l, 'eles/entropy_filter_mpi'))
 
         # Pack and send these interpolated solutions to our neighbours
         g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu_mpi'])
         for send, pack in zip(m['scal_fpts_send'], k['mpiint/scal_fpts_pack']):
             g1.add_mpi_req(send, deps=[pack])
 
-        # If entropy filtering, pack and send the entropy values to neighbours
-        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/entropy_filter_mpi'])
-        for send, pack in zip(m['ent_fpts_send'], k['mpiint/ent_fpts_pack']):
-            g1.add_mpi_req(send, deps=[pack])
+        # Now consider elements that are not involved with MPI exchanges
+        # Perform post-processing of the previous solution stage
+        g1.add_all(k['eles/entropy_filter_core'])
+
+        # Interpolate the solution to the flux points
+        for l in k['eles/disu_core']:
+            g1.add(l, deps=deps(l, 'eles/entropy_filter_core'))
 
         # Compute common entropy minima at internal/boundary interfaces
         g1.add_all(k['iint/comm_entropy'],

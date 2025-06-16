@@ -3,7 +3,11 @@ import numpy as np
 from pyfr.backends.openmp.provider import OpenMPKernel, OpenMPKernelProvider
 
 class OpenMPBlasExtKernels(OpenMPKernelProvider):
-    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Register our pointwise kernel
+        #
 
 
     def axnpby(self, *arr, subdims=None):

@@ -336,19 +336,20 @@ class PyrPolyBasis(BasePolyBasis):
             b = np.where(r != 1, 2*q/(1 - r), 0)
             c = r
 
-        sk = [2**(-k - 0.25)*(k + 0.5)**0.5 for k in range(self.order)]
+        sk = [np.sqrt(2*k + 1) for k in range(self.order)]
         pa = [s*jp for s, jp in zip(sk, jacobi(self.order - 1, 0, 0, a))]
         pb = [s*jp for s, jp in zip(sk, jacobi(self.order - 1, 0, 0, b))]
 
         ob = []
         for i, pi in enumerate(pa):
             for j, pj in enumerate(pb):
-                cij = (1 - c)**(i + j)
+                uij = max(i, j)
+                cij = (1 - c)**uij
                 pij = pi*pj
 
-                pc = jacobi(self.order - max(i, j) - 1, 2*(i + j + 1), 0, c)
+                pc = jacobi(self.order - uij - 1, 2*(uij + 1), 0, c)
                 for k, pk in enumerate(pc):
-                    ck = (2*(k + j + i) + 3)**0.5
+                    ck = np.sqrt(2*(k + uij) + 3) / 2**(uij + 1.5)
 
                     ob.append(cij*ck*pij*pk)
 
@@ -360,7 +361,7 @@ class PyrPolyBasis(BasePolyBasis):
             b = np.where(r != 1, 2*q/(1 - r), 0)
             c = r
 
-        sk = [2**(-k - 0.25)*(k + 0.5)**0.5 for k in range(self.order)]
+        sk = [np.sqrt(2*k + 1) for k in range(self.order)]
         fc = [s*jp for s, jp in zip(sk, jacobi(self.order - 1, 0, 0, a))]
         gc = [s*jp for s, jp in zip(sk, jacobi(self.order - 1, 0, 0, b))]
 
@@ -370,20 +371,19 @@ class PyrPolyBasis(BasePolyBasis):
         ob = []
         for i, (fi, dfi) in enumerate(zip(fc, dfc)):
             for j, (gj, dgj) in enumerate(zip(gc, dgc)):
-                h = jacobi(self.order - max(i, j) - 1, 2*(i + j + 1), 0, c)
-                dh = jacobi_diff(
-                    self.order - max(i, j) - 1, 2*(i + j + 1), 0, c
-                )
+                uij = max(i, j)
+                h = jacobi(self.order - uij - 1, 2*(uij + 1), 0, c)
+                dh = jacobi_diff(self.order - uij - 1, 2*(uij + 1), 0, c)
 
                 for k, (hk, dhk) in enumerate(zip(h, dh)):
-                    ck = (2*(k + j + i) + 3)**0.5
+                    ck = np.sqrt(2*(k + uij) + 3) / 2**(uij + 1.5)
 
-                    tmp = (1 - c)**(i + j - 1) if i + j > 0 else 1
+                    tmp = (1 - c)**(uij - 1) if uij > 0 else 1
 
                     pijk = 2*tmp*dfi*gj*hk
                     qijk = 2*tmp*fi*dgj*hk
-                    rijk = (tmp*(a*dfi*gj + b*fi*dgj - (i + j)*fi*gj)*hk
-                            + (1 - c)**(i + j)*fi*gj*dhk)
+                    rijk = (tmp*(a*dfi*gj + b*fi*dgj - (uij)*fi*gj)*hk
+                            + (1 - c)**(uij)*fi*gj*dhk)
 
                     ob.append([ck*pijk, ck*qijk, ck*rijk])
 

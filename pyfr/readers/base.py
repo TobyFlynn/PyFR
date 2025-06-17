@@ -154,8 +154,8 @@ class NodalMeshAssembler:
             foelemap[petype, epent] = eles[:, :focount]
 
             # Check if pyramids have a parallelogram base or not
-            if petype == 'pyr':
-                self._check_pyr_parallelogram(foelemap[petype, epent])
+            # if petype == 'pyr':
+            #     self._check_pyr_parallelogram(foelemap[petype, epent])
 
         return foelemap
 

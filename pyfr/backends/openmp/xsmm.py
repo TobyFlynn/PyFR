@@ -81,8 +81,10 @@ class OpenMPXSMMKernels(OpenMPKernelProvider):
         try:
             blkptr, blkptr_nt = self._kerns[ckey]
         except KeyError:
+            outnbytes = (out.nrow*out.leaddim*out.nblocks*out.itemsize 
+                         if 'slice' in out.tags else out.nbytes)
             c_is_nt = (beta == 0 and
-                       out.nbytes >= 32*1024**2 and
+                       outnbytes >= 32*1024**2 and
                        self.backend.alignb >= 64)
 
             a_np = np.ascontiguousarray(a.get())

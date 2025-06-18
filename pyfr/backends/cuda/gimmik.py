@@ -47,7 +47,7 @@ class CUDAGiMMiKKernels(CUDAKernelProvider):
             aligne = None
 
         # Cache key
-        ckey = (a.mid, alpha, beta, aligne, ldb, ldc)
+        ckey = (a.mid, alpha, beta, aligne, ldb, ldc, b.ncol)
 
         # Check the kernel cache
         try:

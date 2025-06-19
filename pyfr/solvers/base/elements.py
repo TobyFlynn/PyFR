@@ -271,14 +271,17 @@ class BaseElements:
 
     @memoize
     def smat_at_np(self, name):
-        smats_spts, _ = self._smats_djacs_spts
+        smats, _ = self._smats_djacs_spts(name)
+        # print(smats_spts.shape)
 
-        # Interpolation matrix to pts
-        pt = getattr(self.basis, name) if isinstance(name, str) else name
-        m0 = self.basis.sbasis.nodal_basis_at(pt)
+        # # Interpolation matrix to pts
+        # pt = getattr(self.basis, name) if isinstance(name, str) else name
+        # m0 = self.basis.sbasis.nodal_basis_at(pt)
 
-        # Interpolate the smats
-        smats = np.array([m0 @ smat for smat in smats_spts])
+        # # Interpolate the smats
+        # smats = np.array([m0 @ smat for smat in smats_spts])
+        # print(smats.shape)
+        # print(smats.reshape(self.ndims, -1, self.ndims, self.neles).shape)
         return smats.reshape(self.ndims, -1, self.ndims, self.neles)
 
     @memoize
@@ -288,14 +291,14 @@ class BaseElements:
 
     @memoize
     def rcpdjac_at_np(self, name):
-        _, djacs_spts = self._smats_djacs_spts
+        _, djac = self._smats_djacs_spts(name)
 
-        # Interpolation matrix to pts
-        pt = getattr(self.basis, name) if isinstance(name, str) else name
-        m0 = self.basis.sbasis.nodal_basis_at(pt)
+        # # Interpolation matrix to pts
+        # pt = getattr(self.basis, name) if isinstance(name, str) else name
+        # m0 = self.basis.sbasis.nodal_basis_at(pt)
 
-        # Interpolate the djacs
-        djac = m0 @ djacs_spts
+        # # Interpolate the djacs
+        # djac = m0 @ djacs_spts
 
         if np.any(djac < -1e-5):
             raise RuntimeError('Negative mesh Jacobians detected')
@@ -412,53 +415,47 @@ class BaseElements:
 
         return smats.reshape(ndims, nmpts, -1), djacs
 
-    @cached_property
-    def _smats_djacs_spts(self):
-        # Metric basis with grid point (q<=p) or pseudo grid points (q>p)
-        spts = self.basis.spts
-        sbasis = self.basis.sbasis
 
-        # Dimensions, number of elements and number of mpts
-        ndims, neles, nspts = self.ndims, self.neles, self.nspts
+    def _smats_djacs_spts(self, name):
+        pts = getattr(self.basis, name) if isinstance(name, str) else name
+        npts = len(pts)
 
-        # Physical locations of the pseudo grid points
+        # Physical locations of the shape points
         x = self.ploc_at_np('spts')
 
         # Jacobian operator at these points
-        jacop = np.rollaxis(sbasis.jac_nodal_basis_at(spts), 2)
-        jacop = jacop.reshape(-1, nspts)
+        jacop = np.rollaxis(self.basis.sbasis.jac_nodal_basis_at(pts), 2)
+        jacop = jacop.reshape(-1, self.nspts)
 
         # Cast as a matrix multiply and apply to eles
-        jac = jacop @ x.reshape(nspts, -1)
+        jac = jacop @ x.reshape(self.nspts, -1)
 
-        # Reshape (nspts*ndims, neles*ndims) => (nspts, ndims, neles, ndims)
-        jac = jac.reshape(nspts, ndims, ndims, neles)
+        # Reshape (nmpts*ndims, neles*ndims) => (nmpts, ndims, neles, ndims)
+        jac = jac.reshape(npts, self.ndims, self.ndims, self.neles)
 
-        # Transpose to get (ndims, ndims, nspts, neles)
+        # Transpose to get (ndims, ndims, nmpts, neles)
         jac = jac.transpose(1, 2, 0, 3)
 
-        smats = np.empty((ndims, nspts, ndims, neles))
+        smats = np.empty((self.ndims, npts, self.ndims, self.neles))
 
-        if ndims == 2:
+        if self.ndims == 2:
             a, b, c, d = jac[0, 0], jac[1, 0], jac[0, 1], jac[1, 1]
 
             smats[0, :, 0], smats[0, :, 1] = d, -b
             smats[1, :, 0], smats[1, :, 1] = -c, a
 
-            djacs = a*d - b*c
+            det = a*d - b*c
         else:
-            # We note that J = [x0; x1; x2]
-            x0, x1, x2 = jac
+            cv0, cv1, cv2 = jac
 
             # Contra-variant vector ct[i] = cv[j] x cv[k], smats = [cv]^T
-            smats[0] = np.cross(x1, x2, axisa=0, axisb=0, axisc=1)
-            smats[1] = np.cross(x2, x0, axisa=0, axisb=0, axisc=1)
-            smats[2] = np.cross(x0, x1, axisa=0, axisb=0, axisc=1)
+            smats[0] = np.cross(cv1, cv2, axisa=0, axisb=0, axisc=1)
+            smats[1] = np.cross(cv2, cv0, axisa=0, axisb=0, axisc=1)
+            smats[2] = np.cross(cv0, cv1, axisa=0, axisb=0, axisc=1)
 
-            # Exploit the fact that det(J) = x0 · (x1 ^ x2)
-            djacs = np.einsum('ijk,jik->jk', x0, smats[0])
+            det = np.einsum('ijk,jik->jk', cv0, smats[0])
 
-        return smats.reshape(ndims, nspts, -1), djacs
+        return smats.reshape(self.ndims, npts, -1), det
 
     def get_pnorms(self, eidx, fidx):
         fpts_idx = self.basis.facefpts[fidx]

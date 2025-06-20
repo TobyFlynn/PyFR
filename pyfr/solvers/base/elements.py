@@ -149,46 +149,82 @@ class BaseElements:
 
     @property
     def _mesh_regions(self):
+        # All elements are on the MPI interface
+        if self._coreoff >= self.neles:
+            regions = {'mpi': self.neles}
+            return regions
         off = self._linoff
 
+        # The core region consists of both the curved and the linear regions
+
         # No curved elements
-        if off == 0:
-            regions = {'linear': self.neles}
+        if self._linoff == 0:
+            # No MPI interface elements
+            if self._coreoff == 0:
+                regions = {'linear': self.neles}
+            # Some MPI interface elements
+            else:
+                regions = {'mpi': self._coreoff, 
+                           'linear': self.neles - self._coreoff}
+            regions['core'] = regions['linear']
         # All curved elements
-        elif off >= self.neles:
-            regions = {'curved': self.neles}
+        elif self._linoff >= self.neles:
+            # No MPI interface elements
+            if self._coreoff == 0:
+                regions = {'curved': self.neles}
+            # Some MPI interface elements
+            else:
+                regions = {'mpi': self._coreoff, 
+                           'curved': self.neles - self._coreoff}
+            regions['core'] = regions['curved']
         # Mix of curved and linear elements
         else:
-            regions = {'curved': off, 'linear': self.neles - off}
-        
-        if self._coreoff == 0:
-            regions['core'] = self.neles
-        else:
-            regions['core'] = self.neles - self._coreoff
-            regions['mpi']  = self._coreoff
-        
+            # No MPI interface elements
+            if self._coreoff == 0:
+                regions = {'curved': self._linoff, 
+                           'linear': self.neles - self._linoff}
+                regions['core'] = regions['curved'] + regions['linear']
+            # All MPI elements before last curved element
+            elif self._coreoff < self._linoff:
+                regions = {'mpi': self._coreoff, 
+                           'curved': self._linoff - self._coreoff, 
+                           'linear': self.neles - self._linoff - self._coreoff}
+                regions['core'] = regions['curved'] + regions['linear']
+            # Last MPI elements either after or the same as last curved element
+            else:
+                regions = {'mpi': self._coreoff, 
+                           'linear': self.neles - self._coreoff}
+                regions['core'] = regions['linear']
+
         return regions
 
     def _slice_mat(self, mat, region, ra=None, rb=None):
-        if mat is None:
+        r = self._mesh_regions
+        if mat is None or region not in r:
             return None
 
-        off = self._linoff
-        if region in ['core', 'mpi']:
-            off = self._coreoff
+        if region == 'mpi':
+            start = 0
+        elif region == 'core' or region == 'curved':
+            start = 0 if 'mpi' not in r else r['mpi']
+        elif region == 'linear':
+            start = 0 if 'mpi' not in r else r['mpi']
+            if 'curved' in r:
+                start += r['curved']
+        else:
+            raise ValueError('Invalid slice region')
+        
+        end = start + self._mesh_regions[region]
 
         # Handle stacked matrices
         if len(mat.ioshape) >= 3:
-            off *= mat.ioshape[-2]
+            start *= mat.ioshape[-2]
+            end *= mat.ioshape[-2]
         else:
-            off = min(off, mat.ncol)
-
-        if region in ['curved', 'mpi']:
-            return mat.slice(ra, rb, 0, off)
-        elif region in ['linear', 'core']:
-            return mat.slice(ra, rb, off, mat.ncol)
-        else:
-            raise ValueError('Invalid slice region')
+            start = min(start, mat.ncol)
+            end = min(end, mat.ncol)
+        
+        return mat.slice(ra, rb, start, end)
 
     def _make_sliced_kernel(self, kseq):
         klist = list(kseq)

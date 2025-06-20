@@ -209,7 +209,7 @@ class EulerElements(BaseFluidElements, BaseAdvectionElements):
 
         # Helpers
         tdisf = []
-        c, l = 'curved', 'linear'
+        c, l = 'all-curved', 'linear'
         r, s = self._mesh_regions, self._slice_mat
         slicedk = self._make_sliced_kernel
 

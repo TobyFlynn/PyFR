@@ -30,7 +30,7 @@ class ACNavierStokesElements(BaseACFluidElements,
 
         # Helpers
         tdisf = []
-        c, l = 'curved', 'linear'
+        c, l = 'all-curved', 'linear'
         r, s = self._mesh_regions, self._slice_mat
 
         # Gradient + flux kernel fusion

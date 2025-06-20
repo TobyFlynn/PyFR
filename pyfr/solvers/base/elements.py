@@ -177,6 +177,7 @@ class BaseElements:
                 regions = {'mpi': self._coreoff, 
                            'curved': self.neles - self._coreoff}
             regions['core'] = regions['curved']
+            regions['all-curved'] = self.neles
         # Mix of curved and linear elements
         else:
             # No MPI interface elements
@@ -184,17 +185,20 @@ class BaseElements:
                 regions = {'curved': self._linoff, 
                            'linear': self.neles - self._linoff}
                 regions['core'] = regions['curved'] + regions['linear']
+                regions['all-curved'] = regions['curved']
             # All MPI elements before last curved element
             elif self._coreoff < self._linoff:
                 regions = {'mpi': self._coreoff, 
                            'curved': self._linoff - self._coreoff, 
                            'linear': self.neles - self._linoff - self._coreoff}
                 regions['core'] = regions['curved'] + regions['linear']
+                regions['all-curved'] = regions['mpi'] + regions['curved']
             # Last MPI elements either after or the same as last curved element
             else:
                 regions = {'mpi': self._coreoff, 
                            'linear': self.neles - self._coreoff}
                 regions['core'] = regions['linear']
+                regions['all-curved'] = regions['mpi']
 
         return regions
 
@@ -203,12 +207,10 @@ class BaseElements:
         if mat is None or region not in r:
             return None
 
-        if region == 'mpi':
+        if region == 'mpi' or region == 'all-curved':
             start = 0
-        elif region == 'core':
+        elif region == 'curved' or region == 'core':
             start = self._coreoff
-        elif region == 'curved':
-            start = self._linoff
         elif region == 'linear':
             start = max(self._linoff, self._coreoff)
         else:
@@ -328,7 +330,7 @@ class BaseElements:
 
     @memoize
     def curved_smat_at(self, name):
-        smat = self.smat_at_np(name)[..., :self._linoff]
+        smat = self.smat_at_np(name)[..., :max(self._linoff, self._coreoff)]
         return self._be.const_matrix(smat, tags={'align'})
 
     @memoize

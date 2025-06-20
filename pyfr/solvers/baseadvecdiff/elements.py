@@ -55,20 +55,19 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         }
 
         gradcoru_u = []
-        c, l = 'all-curved', 'linear'
-        if c in regions:
+        if 'curved' in regions:
             gradcoru_u.append(lambda: kernel(
                 'gradcoru', tplargs=tplargs | {'ktype': 'curved'},
-                dims=[self.nupts, regions[c]],
-                gradu=slicem(self._grad_upts, c),
+                dims=[self.nupts, regions['curved']],
+                gradu=slicem(self._grad_upts, 'curved'),
                 smats=self.curved_smat_at('upts'),
                 rcpdjac=self.rcpdjac_at('upts', 'curved')
             ))
         if 'linear' in regions:
             gradcoru_u.append(lambda: kernel(
                 'gradcoru', tplargs=tplargs | {'ktype': 'linear'},
-                dims=[self.nupts, regions[l]],
-                gradu=slicem(self._grad_upts, l),
+                dims=[self.nupts, regions['linear']],
+                gradu=slicem(self._grad_upts, 'linear'),
                 upts=self.upts, verts=self.ploc_at('linspts', 'linear')
             ))
 

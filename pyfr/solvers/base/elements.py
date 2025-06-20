@@ -205,12 +205,12 @@ class BaseElements:
 
         if region == 'mpi':
             start = 0
-        elif region == 'core' or region == 'curved':
-            start = 0 if 'mpi' not in r else r['mpi']
+        elif region == 'core':
+            start = self._coreoff
+        elif region == 'curved':
+            start = self._linoff
         elif region == 'linear':
-            start = 0 if 'mpi' not in r else r['mpi']
-            if 'curved' in r:
-                start += r['curved']
+            start = max(self._linoff, self._coreoff)
         else:
             raise ValueError('Invalid slice region')
         

@@ -16,6 +16,10 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
             bufs |= {'comm_fpts'}
             bufs -= {'vect_fpts'}
 
+        # Avoid self._comm_fpts being a row slice of a different buffer
+        # Important as we are currently using a pointwise kernel to do
+        # the batch mat mults
+        bufs |= {'comm_fpts'}
         return bufs
 
     def set_backend(self, backend, nscalupts, nonce, linoff):
@@ -37,14 +41,32 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
             )
 
         if self.basis.order > 0:
+            # kernels['tgradpcoru_upts'] = lambda uin: kernel(
+            #     'mul', self.opmat('M4 - M6*M0'), self.scal_upts[uin],
+            #     out=self._grad_upts
+            # )
+            # print(self.opmat('M444 - M666*M0').ioshape)
             kernels['tgradpcoru_upts'] = lambda uin: kernel(
-                'mul', self.opmat('M4 - M6*M0'), self.scal_upts[uin],
-                out=self._grad_upts
+                'batchmm', dims=[self.neles], 
+                tplargs={'na': self.nupts*self.ndims, 'nb': self.nupts, 'nvars': self.nvars, 'beta': 0.0},
+                A=self.opmat('M444 - M666*M0'), u=self.scal_upts[uin],
+                v=self._grad_upts
             )
         kernels['tgradcoru_upts'] = lambda: kernel(
             'mul', self.opmat('M6'), self._comm_fpts,
             out=self._grad_upts, beta=float(self.basis.order > 0)
         )
+        # print(f'nfpts: {self.nfpts}')
+        # print(self.nvars)
+        # print(self._grad_upts.ncol)
+        # print(self._grad_upts.nrow)
+        # print(self.opmat('M666').ioshape)
+        # kernels['tgradcoru_upts'] = lambda: kernel(
+        #     'batchmm', dims=[self.neles], 
+        #     tplargs={'na': self.nfpts, 'nb': self.nupts*self.ndims, 'nvars': self.nvars, 'beta': float(self.basis.order > 0)},
+        #     A=self.opmat('M666'), u=self._comm_fpts,
+        #     v=self._grad_upts
+        # )
 
         # Template arguments for the physical gradient kernel
         tplargs = {

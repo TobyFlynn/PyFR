@@ -19,28 +19,10 @@
               rcpdjac='in fpdtype_t'
               verts='in broadcast-col fpdtype_t[${str(nverts)}][${str(ndims)}]'
               upts='in broadcast-row fpdtype_t[${str(ndims)}]'>
-% if 'linear' in ktype:
-    // Compute the S matrices
-    fpdtype_t ${smats}[${ndims}][${ndims}], djac;
-    ${pyfr.expand('calc_smats_detj', 'verts', 'upts', smats, 'djac')};
-    fpdtype_t ${rcpdjac} = 1 / djac;
-% endif
-
-% if 'fused' in ktype:
-    // Transform the corrected gradient
-    ${pyfr.expand('transform_grad', gradu, smats, rcpdjac)};
-% endif
-
     // Compute the flux (F = Fi + Fv)
-    fpdtype_t ftemp[${ndims}][${nvars}];
     fpdtype_t p, v[${ndims}];
-    ${pyfr.expand('inviscid_flux', 'u', 'ftemp', 'p', 'v')};
-    ${pyfr.expand('viscous_flux_add', 'u', gradu, 'ftemp')};
-    ${pyfr.expand('artificial_viscosity_add', gradu, 'ftemp', 'artvisc')};
+    ${pyfr.expand('inviscid_flux', 'u', 'f', 'p', 'v')};
+    ${pyfr.expand('viscous_flux_add', 'u', gradu, 'f')};
+    ${pyfr.expand('artificial_viscosity_add', gradu, 'f', 'artvisc')};
 
-    // Transform the fluxes
-% for i, j in pyfr.ndrange(ndims, nvars):
-    f[${i}][${j}] = ${' + '.join(f'{smats}[{i}][{k}]*ftemp[{k}][{j}]'
-                                 for k in range(ndims))};
-% endfor
 </%pyfr:kernel>

@@ -103,13 +103,6 @@ class BaseShape:
         c = np.einsum('ijkl,jin->ljkn', s, m) # contract over ndims etc.
         return c.reshape(eles.neles, self.nupts, -1)
 
-        #(ndims, nupts, ndims, neles) , (nupts, ndims, nupts) -> (nupts, ndims, neles, nupts, nupts)
-        #c = np.einsum('ijkl,min->jklmn', s, m)
-        #(nupts, ndims, neles, nupts, nupts) -> (nupts, ndims, neles, nupts)
-        #d = np.einsum('jkljn->jkln', c)
-        #(nupts, ndims, neles, nupts) -> (neles, nupts, ndims, nupts) 
-        #e = np.transpose(d, axes=(2, 0, 1, 3))
-
     @cached_property
     def m2(self):
         m = self.norm_fpts[..., None]*self.m0[:, None, :]
@@ -120,10 +113,6 @@ class BaseShape:
         s = eles.smat_at_np('fpts')
         c = np.einsum('ijkl,jin->ljkn', s, m) # contract over ndims etc.
         return c.reshape(eles.neles, self.nfpts, -1)
-
-        #c = np.einsum('ijkl,min->jklmn', s, m)
-        #d = np.einsum('jkljn->jkln', c)
-        #e = np.transpose(d, axes=(2, 0, 1, 3))
 
     @cached_property
     def m3(self):
@@ -141,11 +130,22 @@ class BaseShape:
     def m4(self):
         m = self.m1.reshape(self.nupts, -1, self.nupts).swapaxes(0, 1)
         return m.reshape(-1, self.nupts)
+    
+    def m444(self, eles):
+        m111 = self.m111(eles)
+        m = m111.reshape(eles.neles, self.nupts, -1, self.nupts).swapaxes(1, 2)
+        return m.reshape(eles.neles, -1, self.nupts)
 
     @cached_property
     def m6(self):
         m = self.norm_fpts.T[:, None, :]*self.m3
         return m.reshape(-1, self.nfpts)
+    
+    def m666(self, eles):
+        m = self.norm_fpts.T[:, None, :]*self.m3
+        s = eles.smat_at_np('fpts')
+        c = np.einsum('ijkl,inj->lknj', s, m) # contract over ndims etc.
+        return c.reshape(eles.neles, -1, self.nfpts)
 
     @cached_property
     def m7(self):

@@ -140,12 +140,6 @@ class BaseShape:
     def m6(self):
         m = self.norm_fpts.T[:, None, :]*self.m3
         return m.reshape(-1, self.nfpts)
-    
-    def m666(self, eles):
-        m = self.norm_fpts.T[:, None, :]*self.m3
-        s = eles.smat_at_np('fpts')
-        c = np.einsum('ijkl,inj->lknj', s, m) # contract over ndims etc.
-        return c.reshape(eles.neles, -1, self.nfpts)
 
     @cached_property
     def m7(self):

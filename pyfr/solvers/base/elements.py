@@ -23,7 +23,7 @@ def inters_map(meth):
 
 
 class BaseElements:
-    def __init__(self, basiscls, eles, cfg, phyf=True):
+    def __init__(self, basiscls, eles, cfg):
         self._be = None
 
         self.eles = eles
@@ -69,7 +69,7 @@ class BaseElements:
             self.get_comm_fpts_for_inter = self._get_vect_fpts_for_inter
         
         # Choose whether to use transformed or physcial flux
-        self.phyf = phyf
+        self.phyf = self.basis.name == 'pyr'
         # Choose whether to use the free-stream metric smat or not
         self.fsm = not self.phyf
         if self.fsm:
@@ -283,7 +283,7 @@ class BaseElements:
     # Free stream metric smat (used for all but pyr)
     @memoize
     def smat_fsm_at_np(self, name):
-        smats_mpts, _ = self._smats_djacs_mpts(name)
+        smats_mpts, _ = self._smats_djacs_mpts
 
         # Interpolation matrix to pts
         pt = getattr(self.basis, name) if isinstance(name, str) else name
@@ -295,7 +295,7 @@ class BaseElements:
     
     @memoize
     def rcpdjac_fsm_at_np(self, name):
-        _, djacs_mpts = self._smats_djacs_mpts(name)
+        _, djacs_mpts = self._smats_djacs_mpts
 
         # Interpolation matrix to pts
         pt = getattr(self.basis, name) if isinstance(name, str) else name

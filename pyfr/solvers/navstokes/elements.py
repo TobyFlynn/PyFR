@@ -66,7 +66,7 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
         if self.grad_fusion:
             if c in r:
                 tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'curved-fused'},
+                    'tflux', tplargs=tplargs | {'ktype': 'curved-fused', 'phyf': self.phyf},
                     dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
                     artvisc=s(av, c), f=s(self._vect_upts, c),
                     gradu=s(self._grad_upts, c),
@@ -75,7 +75,7 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
                 ))
             if l in r:
                 tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'linear-fused'},
+                    'tflux', tplargs=tplargs | {'ktype': 'linear-fused', 'phyf': self.phyf},
                     dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
                     artvisc=s(av, l), f=s(self._vect_upts, l),
                     gradu=s(self._grad_upts, l),
@@ -90,14 +90,14 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
         elif 'flux' in self.antialias:
             if c in r:
                 tdisf.append(lambda: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'curved'},
+                    'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
                     dims=[self.nqpts, r[c]], u=s(self._scal_qpts, c),
                     f=s(self._vect_qpts, c), artvisc=s(av, c),
                     smats=self.curved_smat_at('qpts')
                 ))
             if l in r:
                 tdisf.append(lambda: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'linear'},
+                    'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
                     dims=[self.nqpts, r[l]], u=s(self._scal_qpts, l),
                     f=s(self._vect_qpts, l), artvisc=s(av, l),
                     verts=self.ploc_at('linspts', l), upts=self.qpts
@@ -111,14 +111,14 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
         else:
             if c in r:
                 tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'curved'},
+                    'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
                     dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
                     f=s(self._vect_upts, c), artvisc=s(av, c),
                     smats=self.curved_smat_at('upts')
                 ))
             if l in r:
                 tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'linear'},
+                    'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
                     dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
                     f=s(self._vect_upts, l), artvisc=s(av, l),
                     verts=self.ploc_at('linspts', l), upts=self.upts

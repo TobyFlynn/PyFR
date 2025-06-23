@@ -23,7 +23,7 @@ def inters_map(meth):
 
 
 class BaseElements:
-    def __init__(self, basiscls, eles, cfg):
+    def __init__(self, basiscls, eles, cfg, phyf=True):
         self._be = None
 
         self.eles = eles
@@ -67,6 +67,17 @@ class BaseElements:
         else:
             self.get_vect_fpts_for_inter = self._get_vect_fpts_for_inter
             self.get_comm_fpts_for_inter = self._get_vect_fpts_for_inter
+        
+        # Choose whether to use transformed or physcial flux
+        self.phyf = phyf
+        # Choose whether to use the free-stream metric smat or not
+        self.fsm = not self.phyf
+        if self.fsm:
+            self.smat_at_np = self.smat_fsm_at_np
+            self.rcpdjac_at_np = self.rcpdjac_fsm_at_np
+        else:
+            self.smat_at_np = self.smat_reg_at_np
+            self.rcpdjac_at_np = self.rcpdjac_reg_at_np
 
     def set_ics_from_cfg(self):
         # Bring simulation constants into scope
@@ -268,42 +279,55 @@ class BaseElements:
                 return mat
 
         return newfn
-
+    
+    # Free stream metric smat (used for all but pyr)
     @memoize
-    def smat_at_np(self, name):
-        smats, _ = self._smats_djacs_spts(name)
-        # print(smats_spts.shape)
+    def smat_fsm_at_np(self, name):
+        smats_mpts, _ = self._smats_djacs_mpts(name)
 
-        # # Interpolation matrix to pts
-        # pt = getattr(self.basis, name) if isinstance(name, str) else name
-        # m0 = self.basis.sbasis.nodal_basis_at(pt)
+        # Interpolation matrix to pts
+        pt = getattr(self.basis, name) if isinstance(name, str) else name
+        m0 = self.basis.mbasis.nodal_basis_at(pt)
 
-        # # Interpolate the smats
-        # smats = np.array([m0 @ smat for smat in smats_spts])
-        # print(smats.shape)
-        # print(smats.reshape(self.ndims, -1, self.ndims, self.neles).shape)
+        # Interpolate the smats
+        smats = np.array([m0 @ smat for smat in smats_mpts])
         return smats.reshape(self.ndims, -1, self.ndims, self.neles)
-
+    
     @memoize
-    def curved_smat_at(self, name):
-        smat = self.smat_at_np(name)[..., :self._linoff]
-        return self._be.const_matrix(smat, tags={'align'})
+    def rcpdjac_fsm_at_np(self, name):
+        _, djacs_mpts = self._smats_djacs_mpts(name)
 
-    @memoize
-    def rcpdjac_at_np(self, name):
-        _, djac = self._smats_djacs_spts(name)
+        # Interpolation matrix to pts
+        pt = getattr(self.basis, name) if isinstance(name, str) else name
+        m0 = self.basis.mbasis.nodal_basis_at(pt)
 
-        # # Interpolation matrix to pts
-        # pt = getattr(self.basis, name) if isinstance(name, str) else name
-        # m0 = self.basis.sbasis.nodal_basis_at(pt)
-
-        # # Interpolate the djacs
-        # djac = m0 @ djacs_spts
+        # Interpolate the djacs
+        djac = m0 @ djacs_mpts
 
         if np.any(djac < -1e-5):
             raise RuntimeError('Negative mesh Jacobians detected')
 
         return 1.0 / djac
+
+    # Regular smat (only used for pyr)
+    @memoize
+    def smat_reg_at_np(self, name):
+        smats, _ = self._smats_djacs_spts(name)
+        return smats.reshape(self.ndims, -1, self.ndims, self.neles)
+
+    @memoize
+    def rcpdjac_reg_at_np(self, name):
+        _, djac = self._smats_djacs_spts(name)
+
+        if np.any(djac < -1e-5):
+            raise RuntimeError('Negative mesh Jacobians detected')
+
+        return 1.0 / djac
+    
+    @memoize
+    def curved_smat_at(self, name):
+        smat = self.smat_at_np(name)[..., :self._linoff]
+        return self._be.const_matrix(smat, tags={'align'})
 
     @sliceat
     @memoize

@@ -11,14 +11,22 @@
               smats='in fpdtype_t[${str(ndims)}][${str(ndims)}]'
               verts='in broadcast-col fpdtype_t[${str(nverts)}][${str(ndims)}]'
               upts='in broadcast-row fpdtype_t[${str(ndims)}]'>
-% if 'linear' in ktype:
-    // Compute the S matrices
+    // Compute the flux
+    fpdtype_t p, v[${ndims}];
+% if phyf:
+    ${pyfr.expand('inviscid_flux', 'u', 'f', 'p', 'v')};
+ % else:
+ % if 'linear' in ktype:
+    // Compute the S matrices (if not using physical flux)
     fpdtype_t ${smats}[${ndims}][${ndims}], djac;
     ${pyfr.expand('calc_smats_detj', 'verts', 'upts', smats, 'djac')};
 % endif
-
-    // Compute the flux
     fpdtype_t ftemp[${ndims}][${nvars}];
-    fpdtype_t p, v[${ndims}];
-    ${pyfr.expand('inviscid_flux', 'u', 'f', 'p', 'v')};
+    ${pyfr.expand('inviscid_flux', 'u', 'ftemp', 'p', 'v')};
+    // Transform the fluxes
+% for i, j in pyfr.ndrange(ndims, nvars):
+    f[${i}][${j}] = ${' + '.join(f'{smats}[{i}][{k}]*ftemp[{k}][{j}]'
+                                 for k in range(ndims))};
+% endfor
+% endif
 </%pyfr:kernel>

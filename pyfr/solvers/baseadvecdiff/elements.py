@@ -41,32 +41,23 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
             )
 
         if self.basis.order > 0:
-            # kernels['tgradpcoru_upts'] = lambda uin: kernel(
-            #     'mul', self.opmat('M4 - M6*M0'), self.scal_upts[uin],
-            #     out=self._grad_upts
-            # )
-            # print(self.opmat('M444 - M666*M0').ioshape)
-            kernels['tgradpcoru_upts'] = lambda uin: kernel(
-                'batchmm', dims=[self.neles], 
-                tplargs={'na': self.nupts*self.ndims, 'nb': self.nupts, 'nvars': self.nvars, 'beta': 0.0},
-                A=self.opmat('M444 - M666*M0'), u=self.scal_upts[uin],
-                v=self._grad_upts
-            )
+            if self.phyf:
+                kernels['tgradpcoru_upts'] = lambda uin: kernel(
+                    'batchmm', dims=[self.neles], 
+                    tplargs={'na': self.nupts*self.ndims, 'nb': self.nupts, 'nvars': self.nvars, 'beta': 0.0},
+                    A=self.opmat('M444 - M6*M0'), u=self.scal_upts[uin],
+                    v=self._grad_upts
+                )
+            else:
+                kernels['tgradpcoru_upts'] = lambda uin: kernel(
+                    'mul', self.opmat('M4 - M6*M0'), self.scal_upts[uin],
+                    out=self._grad_upts
+                )
+
         kernels['tgradcoru_upts'] = lambda: kernel(
             'mul', self.opmat('M6'), self._comm_fpts,
             out=self._grad_upts, beta=float(self.basis.order > 0)
         )
-        # print(f'nfpts: {self.nfpts}')
-        # print(self.nvars)
-        # print(self._grad_upts.ncol)
-        # print(self._grad_upts.nrow)
-        # print(self.opmat('M666').ioshape)
-        # kernels['tgradcoru_upts'] = lambda: kernel(
-        #     'batchmm', dims=[self.neles], 
-        #     tplargs={'na': self.nfpts, 'nb': self.nupts*self.ndims, 'nvars': self.nvars, 'beta': float(self.basis.order > 0)},
-        #     A=self.opmat('M666'), u=self._comm_fpts,
-        #     v=self._grad_upts
-        # )
 
         # Template arguments for the physical gradient kernel
         tplargs = {
@@ -79,7 +70,7 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         gradcoru_u = []
         if 'curved' in regions:
             gradcoru_u.append(lambda: kernel(
-                'gradcoru', tplargs=tplargs | {'ktype': 'curved'},
+                'gradcoru', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
                 dims=[self.nupts, regions['curved']],
                 gradu=slicem(self._grad_upts, 'curved'),
                 smats=self.curved_smat_at('upts'),
@@ -87,7 +78,7 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
             ))
         if 'linear' in regions:
             gradcoru_u.append(lambda: kernel(
-                'gradcoru', tplargs=tplargs | {'ktype': 'linear'},
+                'gradcoru', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
                 dims=[self.nupts, regions['linear']],
                 gradu=slicem(self._grad_upts, 'linear'),
                 upts=self.upts, verts=self.ploc_at('linspts', 'linear')

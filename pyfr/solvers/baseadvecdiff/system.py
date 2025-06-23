@@ -91,23 +91,32 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
             g2.add(l, deps=deps(l, 'eles/tgradcoru_upts'))
 
         # Compute the fused transformed flux and corrected gradient
-        for l in k['eles/tdisf_fused']:
+        for l in k['eles/tdisf_fused_mpi']:
+            ldeps = deps(l, 'eles/tgradcoru_upts')
+            g2.add(l, deps=ldeps)
+        
+        for l in k['eles/tdisf_fused_core']:
             ldeps = deps(l, 'eles/tgradcoru_upts')
             g2.add(l, deps=ldeps)
 
         # Interpolate these gradients to the flux points
-        for l in k['eles/gradcoru_fpts']:
-            ldeps = deps(l, 'eles/tdisf_fused', 'eles/gradcoru_upts')
+        for l in k['eles/gradcoru_fpts_mpi']:
+            ldeps = deps(l, 'eles/tdisf_fused_mpi', 'eles/gradcoru_upts')
+            g2.add(l, deps=ldeps)
+        
+        for l in k['eles/gradcoru_fpts_core']:
+            ldeps = deps(l, 'eles/tdisf_fused_core', 'eles/gradcoru_upts')
             g2.add(l, deps=ldeps)
 
         # Set dependencies for interface flux interpolation
-        ideps = k['eles/gradcoru_fpts'] or k['eles/gradcoru_upts']
+        mpiideps = k['eles/gradcoru_fpts_mpi'] or k['eles/gradcoru_upts']
 
         # Pack and send these interpolated gradients to our neighbours
-        g2.add_all(k['mpiint/vect_fpts_pack'], deps=ideps)
+        g2.add_all(k['mpiint/vect_fpts_pack'], deps=mpiideps)
         for send, pack in zip(m['vect_fpts_send'], k['mpiint/vect_fpts_pack']):
             g2.add_mpi_req(send, deps=[pack])
 
+        ideps = (k['eles/gradcoru_fpts_mpi'] + k['eles/gradcoru_fpts_core']) or k['eles/gradcoru_upts']
         # Compute the common normal flux at our internal/boundary interfaces
         g2.add_all(k['iint/comm_flux'],
                    deps=ideps, pdeps=k['mpiint/vect_fpts_pack'])
@@ -133,38 +142,38 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
 
         # Compute the transformed divergence of the partially corrected flux
         for l in k['eles/tdivtpcorf']:
-            g2.add(l, deps=deps(l, 'eles/tdisf', 'eles/tdisf_fused'))
+            g2.add(l, deps=deps(l, 'eles/tdisf', 'eles/tdisf_fused_mpi', 'eles/tdisf_fused_core'))
 
-        kgroup = [
-            k['eles/tgradpcoru_upts'], k['eles/tgradcoru_upts'],
-            k['eles/gradcoru_upts'], k['eles/tdisf_fused'],
-            k['eles/gradcoru_fpts'], k['eles/gradcoru_qpts'],
-            k['eles/qptsu'], k['eles/tdisf'], k['eles/tdivtpcorf']
-        ]
-        for ks in zip_longest(*kgroup):
-            # Flux-AA on; inputs to tdisf and tdivtpcorf are from quad pts
-            if k['eles/qptsu']:
-                subs = [
-                    [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
-                     (ks[4], 'b'), (ks[5], 'b')],
-                    [(ks[6], 'out'), (ks[7], 'u')],
-                    [(ks[5], 'out'), (ks[7], 'f'), (ks[8], 'b')],
-                ]
-            # Gradient fusion on; tdisf_fused replaces tdisf and gradcoru_upts
-            elif k['eles/tdisf_fused']:
-                subs = [
-                    [(ks[0], 'out'), (ks[1], 'out'),
-                     (ks[3], 'gradu'), (ks[4], 'b')],
-                    [(ks[3], 'f'), (ks[8], 'b')],
-                ]
-            # No flux-AA and no gradient fusion
-            else:
-                subs = [
-                    [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
-                     (ks[4], 'b'), (ks[7], 'f'), (ks[8], 'b')],
-                ]
+        # kgroup = [
+        #     k['eles/tgradpcoru_upts'], k['eles/tgradcoru_upts'],
+        #     k['eles/gradcoru_upts'], k['eles/tdisf_fused'],
+        #     k['eles/gradcoru_fpts'], k['eles/gradcoru_qpts'],
+        #     k['eles/qptsu'], k['eles/tdisf'], k['eles/tdivtpcorf']
+        # ]
+        # for ks in zip_longest(*kgroup):
+        #     # Flux-AA on; inputs to tdisf and tdivtpcorf are from quad pts
+        #     if k['eles/qptsu']:
+        #         subs = [
+        #             [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
+        #              (ks[4], 'b'), (ks[5], 'b')],
+        #             [(ks[6], 'out'), (ks[7], 'u')],
+        #             [(ks[5], 'out'), (ks[7], 'f'), (ks[8], 'b')],
+        #         ]
+        #     # Gradient fusion on; tdisf_fused replaces tdisf and gradcoru_upts
+        #     elif k['eles/tdisf_fused']:
+        #         subs = [
+        #             [(ks[0], 'out'), (ks[1], 'out'),
+        #              (ks[3], 'gradu'), (ks[4], 'b')],
+        #             [(ks[3], 'f'), (ks[8], 'b')],
+        #         ]
+        #     # No flux-AA and no gradient fusion
+        #     else:
+        #         subs = [
+        #             [(ks[0], 'out'), (ks[1], 'out'), (ks[2], 'gradu'),
+        #              (ks[4], 'b'), (ks[7], 'f'), (ks[8], 'b')],
+        #         ]
 
-            self._group(g2, ks, subs=subs)
+        #     self._group(g2, ks, subs=subs)
 
         g2.commit()
 

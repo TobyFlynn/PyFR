@@ -64,6 +64,8 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
 
         # Gradient + flux kernel fusion
         if self.grad_fusion:
+            print('tdisf_fused')
+            tdisf_core = []
             if c in r:
                 tdisf.append(lambda uin: self._be.kernel(
                     'tflux', tplargs=tplargs | {'ktype': 'curved-fused'},
@@ -74,18 +76,47 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
                     smats=self.curved_smat_at('upts')
                 ))
             if l in r:
-                tdisf.append(lambda uin: self._be.kernel(
+                linkern = lambda uin: self._be.kernel(
                     'tflux', tplargs=tplargs | {'ktype': 'linear-fused'},
                     dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
                     artvisc=s(av, l), f=s(self._vect_upts, l),
                     gradu=s(self._grad_upts, l),
                     verts=self.ploc_at('linspts', l), upts=self.upts
+                )
+                tdisf.append(linkern)
+                tdisf_core.append(linkern)
+            if 'corecurved' in r:
+                tdisf_core.append(lambda uin: self._be.kernel(
+                    'tflux', tplargs=tplargs | {'ktype': 'curved-fused'},
+                    dims=[self.nupts, r['corecurved']], u=s(self.scal_upts[uin], 'corecurved'),
+                    artvisc=s(av, 'corecurved'), f=s(self._vect_upts, 'corecurved'),
+                    gradu=s(self._grad_upts, 'corecurved'),
+                    rcpdjac=self.rcpdjac_at('upts', 'corecurved'),
+                    smats=s(self.curved_smat_at('upts'), 'corecurved')
                 ))
 
             def tdisf_k(uin):
                 return self._make_sliced_kernel(k(uin) for k in tdisf)
 
             self.kernels['tdisf_fused'] = tdisf_k
+
+            def tdisf_k_core(uin):
+                return self._make_sliced_kernel(k(uin) for k in tdisf_core)
+            
+            self.kernels['tdisf_fused_core'] = tdisf_k_core
+
+            if 'mpi' in r:
+                # Treat all MPI elements as curved
+                self.kernels['tdisf_fused_mpi'] = lambda uin: self._be.kernel(
+                    'tflux', tplargs=tplargs | {'ktype': 'curved-fused'},
+                    dims=[self.nupts, r['mpi']], u=s(self.scal_upts[uin], 'mpi'),
+                    artvisc=s(av, 'mpi'), f=s(self._vect_upts, 'mpi'),
+                    gradu=s(self._grad_upts, 'mpi'),
+                    rcpdjac=self.rcpdjac_at('upts', 'mpi'),
+                    smats=self.curved_smat_at('upts')
+                )
+
+            
         # No gradient + flux kernel fusion, with flux-AA
         elif 'flux' in self.antialias:
             if c in r:

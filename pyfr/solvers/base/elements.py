@@ -167,6 +167,9 @@ class BaseElements:
             regions['core'] = self.neles - self._coreoff
             regions['mpi']  = self._coreoff
         
+        if self._linoff > self._coreoff:
+            regions['corecurved'] = self._linoff - self._coreoff
+        
         return regions
 
     def _slice_mat(self, mat, region, ra=None, rb=None):
@@ -187,6 +190,9 @@ class BaseElements:
             return mat.slice(ra, rb, 0, off)
         elif region in ['linear', 'core']:
             return mat.slice(ra, rb, off, mat.ncol)
+        elif region == 'corecurved':
+            start = self._coreoff * mat.ioshape[-2] if len(mat.ioshape) >= 3 else min(self._coreoff, mat.ncol)
+            return mat.slice(ra, rb, start, off)
         else:
             raise ValueError('Invalid slice region')
 
@@ -207,6 +213,7 @@ class BaseElements:
 
         if self.basis.order >= 2:
             self._linoff = linoff - linoff % -backend.csubsz
+            self._linoff = max(self._linoff, self._coreoff)
         else:
             self._linoff = self.neles
 

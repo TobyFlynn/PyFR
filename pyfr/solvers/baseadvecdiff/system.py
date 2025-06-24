@@ -68,52 +68,39 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g2.add_mpi_reqs(m['artvisc_fpts_recv'])
         g2.add_mpi_reqs(m['vect_fpts_recv'])
 
+        # On elements involved with MPI exchanges:
         # Compute the transformed gradient of the partially corrected solution
         g2.add_all(k['eles/tgradpcoru_upts_mpi'])
         g2.add_mpi_reqs(m['artvisc_fpts_send'], deps=k['eles/tgradpcoru_upts_mpi'])
-        g2.add_all(k['eles/tgradpcoru_upts_core'])
 
         # Compute the common solution at our MPI interfaces
         g2.add_all(k['mpiint/scal_fpts_unpack'])
         for l in k['mpiint/con_u']:
             g2.add(l, deps=deps(l, 'mpiint/scal_fpts_unpack'))
-
-        # Compute common entropy minima at MPI interfaces
-        g2.add_all(k['mpiint/ent_fpts_unpack'])
-        for l in k['mpiint/comm_entropy']:
-            g2.add(l, deps=deps(l, 'mpiint/ent_fpts_unpack'))
-
+        
         # Compute the transformed gradient of the corrected solution
         for l in k['eles/tgradcoru_upts_mpi']:
             g2.add(l, deps=deps(l, 'eles/tgradpcoru_upts_mpi') + k['mpiint/con_u'])
-        for l in k['eles/tgradcoru_upts_core']:
-            g2.add(l, deps=deps(l, 'eles/tgradpcoru_upts_core'))
-
+        
         # Obtain the physical gradients at the solution points
         for l in k['eles/gradcoru_upts_mpi']:
             g2.add(l, deps=deps(l, 'eles/tgradcoru_upts_mpi'))
-
-        for l in k['eles/gradcoru_upts_core']:
-            g2.add(l, deps=deps(l, 'eles/tgradcoru_upts_core'))
-
+        
         # Compute the fused transformed flux and corrected gradient
         for l in k['eles/tdisf_fused_mpi']:
             ldeps = deps(l, 'eles/tgradcoru_upts_mpi')
             g2.add(l, deps=ldeps)
         
-        for l in k['eles/tdisf_fused_core']:
-            ldeps = deps(l, 'eles/tgradcoru_upts_core')
+        # Compute the fused transformed flux and corrected gradient
+        for l in k['eles/tdisf_fused_mpi']:
+            ldeps = deps(l, 'eles/tgradcoru_upts_mpi')
             g2.add(l, deps=ldeps)
-
+        
         # Interpolate these gradients to the flux points
         for l in k['eles/gradcoru_fpts_mpi']:
             ldeps = deps(l, 'eles/tdisf_fused_mpi', 'eles/gradcoru_upts_mpi')
             g2.add(l, deps=ldeps)
         
-        for l in k['eles/gradcoru_fpts_core']:
-            ldeps = deps(l, 'eles/tdisf_fused_core', 'eles/gradcoru_upts_core')
-            g2.add(l, deps=ldeps)
-
         # Set dependencies for interface flux interpolation
         mpiideps = k['eles/gradcoru_fpts_mpi'] or k['eles/gradcoru_upts_mpi']
 
@@ -121,6 +108,33 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g2.add_all(k['mpiint/vect_fpts_pack'], deps=mpiideps)
         for send, pack in zip(m['vect_fpts_send'], k['mpiint/vect_fpts_pack']):
             g2.add_mpi_req(send, deps=[pack])
+
+        # Now consider elements that are not involved with MPI exchanges
+        # Compute the transformed gradient of the partially corrected solution
+        g2.add_all(k['eles/tgradpcoru_upts_core'])
+
+        # Compute the transformed gradient of the corrected solution
+        for l in k['eles/tgradcoru_upts_core']:
+            g2.add(l, deps=deps(l, 'eles/tgradpcoru_upts_core'))
+
+        # Obtain the physical gradients at the solution points
+        for l in k['eles/gradcoru_upts_core']:
+            g2.add(l, deps=deps(l, 'eles/tgradcoru_upts_core'))
+
+        # Compute the fused transformed flux and corrected gradient
+        for l in k['eles/tdisf_fused_core']:
+            ldeps = deps(l, 'eles/tgradcoru_upts_core')
+            g2.add(l, deps=ldeps)
+
+        # Interpolate these gradients to the flux points
+        for l in k['eles/gradcoru_fpts_core']:
+            ldeps = deps(l, 'eles/tdisf_fused_core', 'eles/gradcoru_upts_core')
+            g2.add(l, deps=ldeps)
+
+        # Compute common entropy minima at MPI interfaces
+        g2.add_all(k['mpiint/ent_fpts_unpack'])
+        for l in k['mpiint/comm_entropy']:
+            g2.add(l, deps=deps(l, 'mpiint/ent_fpts_unpack'))
 
         ideps = (k['eles/gradcoru_fpts_mpi'] + k['eles/gradcoru_fpts_core']) or (k['eles/gradcoru_upts_mpi'] + k['eles/gradcoru_upts_core'])
         # Compute the common normal flux at our internal/boundary interfaces

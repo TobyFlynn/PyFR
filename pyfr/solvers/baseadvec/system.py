@@ -118,24 +118,31 @@ class BaseAdvectionSystem(BaseSystem):
         g1 = self.backend.graph()
         g1.add_mpi_reqs(m['ent_fpts_recv'])
 
-        g1.add_all(k['eles/entropy_filter'])
-
-        # Interpolate the solution to the flux points
-        if 'eles/local_entropy' in k:
-            g1.add_all(k['eles/disu'], deps=k['eles/entropy_filter'])
+        # On elements involved with MPI exchanges:
+        g1.add_all(k['eles/entropy_filter_mpi'])
 
         # Compute local minimum entropy within element
-        g1.add_all(k['eles/local_entropy'], deps=k['eles/entropy_filter'])
+        g1.add_all(k['eles/local_entropy_mpi'], deps=k['eles/entropy_filter_mpi'])
 
         # Pack and send the entropy values to neighbours
-        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/local_entropy'])
+        g1.add_all(k['mpiint/ent_fpts_pack'], deps=k['eles/local_entropy_mpi'])
         for send, pack in zip(m['ent_fpts_send'], k['mpiint/ent_fpts_pack']):
             g1.add_mpi_req(send, deps=[pack])
 
+        # Now consider elements that are not involved with MPI exchanges
+        g1.add_all(k['eles/entropy_filter_core'])
+
+        # Interpolate the solution to the flux points
+        if 'eles/entropy_filter_core' in k:
+            g1.add_all(k['eles/disu'], deps=k['eles/entropy_filter_core'] + k['eles/entropy_filter_mpi'])
+
+        # Compute local minimum entropy within element
+        g1.add_all(k['eles/local_entropy_core'], deps=k['eles/entropy_filter_core'])
+
         # Compute common entropy minima at internal/boundary interfaces
-        g1.add_all(k['iint/comm_entropy'], deps=k['eles/local_entropy'])
-        g1.add_all(k['bcint/comm_entropy'],
-                   deps=k['eles/local_entropy'] + k['eles/disu'])
+        ideps = k['eles/local_entropy_core'] + k['eles/local_entropy_mpi']
+        g1.add_all(k['iint/comm_entropy'], deps=ideps)
+        g1.add_all(k['bcint/comm_entropy'], deps=ideps + k['eles/disu'])
         g1.commit()
 
         if 'mpiint/comm_entropy' in k:

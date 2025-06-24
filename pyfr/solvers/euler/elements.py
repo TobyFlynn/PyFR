@@ -165,6 +165,21 @@ class BaseFluidElements:
                 m0=self.m0
             )
 
+            self.kernels['local_entropy_core'] = lambda uin: self._be.kernel(
+                'entropylocal', tplargs=eftplargs, dims=[regions['core']],
+                u=self._slice_mat(self.scal_upts[uin], 'core'), 
+                entmin_int=self._slice_mat(self.entmin_int, 'core'),
+                m0=self.m0
+            )
+            # Check if there is an MPI region (elements that are in an MPI buffer)
+            if 'mpi' in regions:
+                self.kernels['local_entropy_mpi'] = lambda uin: self._be.kernel(
+                    'entropylocal', tplargs=eftplargs, dims=[regions['mpi']],
+                    u=self._slice_mat(self.scal_upts[uin], 'mpi'), 
+                    entmin_int=self._slice_mat(self.entmin_int, 'mpi'),
+                    m0=self.m0
+                )
+
             # Apply entropy filter
             self.kernels['entropy_filter'] = lambda uin: self._be.kernel(
                 'entropyfilter', tplargs=eftplargs, dims=[self.neles],

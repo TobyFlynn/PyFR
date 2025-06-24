@@ -64,7 +64,6 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
 
         # Gradient + flux kernel fusion
         if self.grad_fusion:
-            print('tdisf_fused')
             tdisf_core = []
             if c in r:
                 tdisf.append(lambda uin: self._be.kernel(
@@ -76,15 +75,15 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
                     smats=self.curved_smat_at('upts')
                 ))
             if l in r:
-                linkern = lambda uin: self._be.kernel(
+                lin_kern = lambda uin: self._be.kernel(
                     'tflux', tplargs=tplargs | {'ktype': 'linear-fused'},
                     dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
                     artvisc=s(av, l), f=s(self._vect_upts, l),
                     gradu=s(self._grad_upts, l),
                     verts=self.ploc_at('linspts', l), upts=self.upts
                 )
-                tdisf.append(linkern)
-                tdisf_core.append(linkern)
+                tdisf.append(lin_kern)
+                tdisf_core.append(lin_kern)
             if 'corecurved' in r:
                 tdisf_core.append(lambda uin: self._be.kernel(
                     'tflux', tplargs=tplargs | {'ktype': 'curved-fused'},
@@ -113,7 +112,7 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
                     artvisc=s(av, 'mpi'), f=s(self._vect_upts, 'mpi'),
                     gradu=s(self._grad_upts, 'mpi'),
                     rcpdjac=self.rcpdjac_at('upts', 'mpi'),
-                    smats=self.curved_smat_at('upts')
+                    smats=s(self.curved_smat_at('upts'), 'mpi')
                 )
 
             

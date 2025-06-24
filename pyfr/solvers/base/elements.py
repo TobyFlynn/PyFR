@@ -175,24 +175,37 @@ class BaseElements:
     def _slice_mat(self, mat, region, ra=None, rb=None):
         if mat is None:
             return None
+        
+        pmat = mat
+        pra = ra
+        prb = rb
+
+        if 'slice' in mat.tags:
+            if ra is not None or rb is not None:
+                raise ValueError('Cannot slice an exisiting slice with new row indices')
+            if mat.ca != 0 or mat.cb != mat.parent.ncol:
+                raise ValueError('Cannot slice an exisiting slice unless the prexisting slice includes all columns of parent matrix')
+            pmat = mat.parent
+            pra = mat.ra
+            prb = mat.rb
 
         off = self._linoff
         if region in ['core', 'mpi']:
             off = self._coreoff
 
         # Handle stacked matrices
-        if len(mat.ioshape) >= 3:
-            off *= mat.ioshape[-2]
+        if len(pmat.ioshape) >= 3:
+            off *= pmat.ioshape[-2]
         else:
-            off = min(off, mat.ncol)
+            off = min(off, pmat.ncol)
 
         if region in ['curved', 'mpi']:
-            return mat.slice(ra, rb, 0, off)
+            return pmat.slice(pra, prb, 0, off)
         elif region in ['linear', 'core']:
-            return mat.slice(ra, rb, off, mat.ncol)
+            return pmat.slice(pra, prb, off, pmat.ncol)
         elif region == 'corecurved':
-            start = self._coreoff * mat.ioshape[-2] if len(mat.ioshape) >= 3 else min(self._coreoff, mat.ncol)
-            return mat.slice(ra, rb, start, off)
+            start = self._coreoff * pmat.ioshape[-2] if len(pmat.ioshape) >= 3 else min(self._coreoff, pmat.ncol)
+            return pmat.slice(pra, prb, start, off)
         else:
             raise ValueError('Invalid slice region')
 

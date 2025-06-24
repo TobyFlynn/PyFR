@@ -41,9 +41,27 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
                 'mul', self.opmat('M4 - M6*M0'), self.scal_upts[uin],
                 out=self._grad_upts
             )
+            kernels['tgradpcoru_upts_mpi'] = lambda uin: kernel(
+                'mul', self.opmat('M4 - M6*M0'), slicem(self.scal_upts[uin], 'mpi'),
+                out=slicem(self._grad_upts, 'mpi')
+            )
+            kernels['tgradpcoru_upts_core'] = lambda uin: kernel(
+                'mul', self.opmat('M4 - M6*M0'), slicem(self.scal_upts[uin], 'core'),
+                out=slicem(self._grad_upts, 'core')
+            )
         kernels['tgradcoru_upts'] = lambda: kernel(
             'mul', self.opmat('M6'), self._comm_fpts,
             out=self._grad_upts, beta=float(self.basis.order > 0)
+        )
+
+        kernels['tgradcoru_upts_mpi'] = lambda: kernel(
+            'mul', self.opmat('M6'), slicem(self._comm_fpts, 'mpi'),
+            out=slicem(self._grad_upts, 'mpi'), beta=float(self.basis.order > 0)
+        )
+
+        kernels['tgradcoru_upts_core'] = lambda: kernel(
+            'mul', self.opmat('M6'), slicem(self._comm_fpts, 'core'),
+            out=slicem(self._grad_upts, 'core'), beta=float(self.basis.order > 0)
         )
 
         # Template arguments for the physical gradient kernel
@@ -55,6 +73,7 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         }
 
         gradcoru_u = []
+        gradcoru_u_core = []
         if 'curved' in regions:
             gradcoru_u.append(lambda: kernel(
                 'gradcoru', tplargs=tplargs | {'ktype': 'curved'},
@@ -64,17 +83,39 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
                 rcpdjac=self.rcpdjac_at('upts', 'curved')
             ))
         if 'linear' in regions:
-            gradcoru_u.append(lambda: kernel(
+            lin_kern = lambda: kernel(
                 'gradcoru', tplargs=tplargs | {'ktype': 'linear'},
                 dims=[self.nupts, regions['linear']],
                 gradu=slicem(self._grad_upts, 'linear'),
                 upts=self.upts, verts=self.ploc_at('linspts', 'linear')
+            )
+            gradcoru_u.append(lin_kern)
+            gradcoru_u_core.append(lin_kern)
+        if 'corecurved' in regions:
+            gradcoru_u_core.append(lambda: kernel(
+                'gradcoru', tplargs=tplargs | {'ktype': 'curved'},
+                dims=[self.nupts, regions['corecurved']],
+                gradu=slicem(self._grad_upts, 'corecurved'),
+                smats=slicem(self.curved_smat_at('upts'), 'corecurved'),
+                rcpdjac=self.rcpdjac_at('upts', 'corecurved')
             ))
 
         kernels['gradcoru_u'] = lambda: slicedk(k() for k in gradcoru_u)
+        kernels['gradcoru_u_core'] = lambda: slicedk(k() for k in gradcoru_u_core)
+
+        if 'mpi' in regions:
+            kernels['gradcoru_u_mpi'] = lambda: kernel(
+                'gradcoru', tplargs=tplargs | {'ktype': 'curved'},
+                dims=[self.nupts, regions['mpi']],
+                gradu=slicem(self._grad_upts, 'mpi'),
+                smats=slicem(self.curved_smat_at('upts'), 'mpi'),
+                rcpdjac=self.rcpdjac_at('upts', 'mpi')
+            )
 
         if not self.grad_fusion or self.basis.order == 0:
             kernels['gradcoru_upts'] = kernels['gradcoru_u']
+            kernels['gradcoru_upts_mpi'] = kernels['gradcoru_u_mpi']
+            kernels['gradcoru_upts_core'] = kernels['gradcoru_u_core']
 
         def gradcoru_fpts():
             nupts, nfpts = self.nupts, self.nfpts

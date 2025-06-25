@@ -124,14 +124,26 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
 
             return self._be.unordered_meta_kernel(muls)
 
-        def gradcoru_fpts_region(r):
+        def gradcoru_fpts_mpi():
             nupts, nfpts = self.nupts, self.nfpts
             vupts, vfpts = self._grad_upts, self._vect_fpts
 
             # Exploit the block-diagonal form of the operator
             muls = [kernel('mul', self.opmat('M0'),
-                           self._slice_mat(vupts, r, i*nupts, (i + 1)*nupts),
-                           self._slice_mat(vfpts, r, i*nfpts, (i + 1)*nfpts))
+                           self._slice_mat(vupts, 'mpi', i*nupts, (i + 1)*nupts),
+                           self._slice_mat(vfpts, 'mpi', i*nfpts, (i + 1)*nfpts))
+                    for i in range(self.ndims)]
+
+            return self._be.unordered_meta_kernel(muls)
+        
+        def gradcoru_fpts_core():
+            nupts, nfpts = self.nupts, self.nfpts
+            vupts, vfpts = self._grad_upts, self._vect_fpts
+
+            # Exploit the block-diagonal form of the operator
+            muls = [kernel('mul', self.opmat('M0'),
+                           self._slice_mat(vupts, 'core', i*nupts, (i + 1)*nupts),
+                           self._slice_mat(vfpts, 'core', i*nfpts, (i + 1)*nfpts))
                     for i in range(self.ndims)]
 
             return self._be.unordered_meta_kernel(muls)
@@ -139,8 +151,8 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         if not self.basis.fpts_in_upts:
             kernels['gradcoru_fpts'] = gradcoru_fpts
             if 'mpi' in regions:
-                kernels['gradcoru_fpts_mpi'] = gradcoru_fpts_region('mpi')
-            kernels['gradcoru_fpts_core'] = gradcoru_fpts_region('core')
+                kernels['gradcoru_fpts_mpi'] = gradcoru_fpts_mpi
+            kernels['gradcoru_fpts_core'] = gradcoru_fpts_core
 
         if 'flux' in self.antialias and self.basis.order > 0:
             def gradcoru_qpts():

@@ -79,17 +79,12 @@ class BaseAdvectionElements(BaseElements):
             'mul', self.opmat('M0'), self.scal_upts[uin],
             out=self._scal_fpts
         )
-        # Check if there is an MPI region (elements that are in an MPI buffer)
-        if 'mpi' in regions:
-            kernels['disu_mpi'] = lambda uin: self._be.kernel(
-                'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'mpi'),
-                out=self._slice_mat(self._scal_fpts, 'mpi')
-            )
-        # Always a core region
-        kernels['disu_core'] = lambda uin: self._be.kernel(
-            'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], 'core'),
-            out=self._slice_mat(self._scal_fpts, 'core')
-        )
+        for r in ['mpi', 'core']:
+            if r in regions:
+                kernels[f'disu_{r}'] = lambda uin: self._be.kernel(
+                    'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], r),
+                    out=self._slice_mat(self._scal_fpts, r)
+                )
 
         if fluxaa and self.basis.order > 0:
             kernels['qptsu'] = lambda uin: self._be.kernel(

@@ -164,21 +164,14 @@ class BaseFluidElements:
                 u=self.scal_upts[uin], entmin_int=self.entmin_int,
                 m0=self.m0
             )
-
-            self.kernels['local_entropy_core'] = lambda uin: self._be.kernel(
-                'entropylocal', tplargs=eftplargs, dims=[regions['core']],
-                u=self._slice_mat(self.scal_upts[uin], 'core'), 
-                entmin_int=self._slice_mat(self.entmin_int, 'core'),
-                m0=self.m0
-            )
-            # Check if there is an MPI region (elements that are in an MPI buffer)
-            if 'mpi' in regions:
-                self.kernels['local_entropy_mpi'] = lambda uin: self._be.kernel(
-                    'entropylocal', tplargs=eftplargs, dims=[regions['mpi']],
-                    u=self._slice_mat(self.scal_upts[uin], 'mpi'), 
-                    entmin_int=self._slice_mat(self.entmin_int, 'mpi'),
-                    m0=self.m0
-                )
+            for r in ['mpi', 'core']:
+                if r in regions:
+                    self.kernels[f'local_entropy_{r}'] = lambda uin: self._be.kernel(
+                        'entropylocal', tplargs=eftplargs, dims=[regions[r]],
+                        u=self._slice_mat(self.scal_upts[uin], r), 
+                        entmin_int=self._slice_mat(self.entmin_int, r),
+                        m0=self.m0
+                    )
 
             # Apply entropy filter
             self.kernels['entropy_filter'] = lambda uin: self._be.kernel(
@@ -186,20 +179,14 @@ class BaseFluidElements:
                 u=self.scal_upts[uin], entmin_int=self.entmin_int,
                 vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
             )
-            # Check if there is an MPI region (elements that are in an MPI buffer)
-            if 'mpi' in regions:
-                self.kernels['entropy_filter_mpi'] = lambda uin: self._be.kernel(
-                    'entropyfilter', tplargs=eftplargs, dims=[regions['mpi']],
-                    u=self._slice_mat(self.scal_upts[uin], 'mpi'), 
-                    entmin_int=self._slice_mat(self.entmin_int, 'mpi'),
-                    vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
-                )
-            self.kernels['entropy_filter_core'] = lambda uin: self._be.kernel(
-                'entropyfilter', tplargs=eftplargs, dims=[regions['core']],
-                u=self._slice_mat(self.scal_upts[uin], 'core'), 
-                entmin_int=self._slice_mat(self.entmin_int, 'core'),
-                vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
-            )
+            for r in ['mpi', 'core']:
+                if r in regions:
+                    self.kernels[f'entropy_filter_{r}'] = lambda uin: self._be.kernel(
+                        'entropyfilter', tplargs=eftplargs, dims=[regions[r]],
+                        u=self._slice_mat(self.scal_upts[uin], r), 
+                        entmin_int=self._slice_mat(self.entmin_int, r),
+                        vdm=self.vdm_ef, invvdm=self.invvdm, m0=self.m0
+                    )
 
 
 class EulerElements(BaseFluidElements, BaseAdvectionElements):

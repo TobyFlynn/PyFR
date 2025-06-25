@@ -166,7 +166,7 @@ class BaseFluidElements:
             )
             for r in ['mpi', 'core']:
                 if r in regions:
-                    self.kernels[f'local_entropy_{r}'] = lambda uin: self._be.kernel(
+                    self.kernels[f'local_entropy_{r}'] = lambda uin, r=r: self._be.kernel(
                         'entropylocal', tplargs=eftplargs, dims=[regions[r]],
                         u=self._slice_mat(self.scal_upts[uin], r), 
                         entmin_int=self._slice_mat(self.entmin_int, r),
@@ -181,7 +181,7 @@ class BaseFluidElements:
             )
             for r in ['mpi', 'core']:
                 if r in regions:
-                    self.kernels[f'entropy_filter_{r}'] = lambda uin: self._be.kernel(
+                    self.kernels[f'entropy_filter_{r}'] = lambda uin, r=r: self._be.kernel(
                         'entropyfilter', tplargs=eftplargs, dims=[regions[r]],
                         u=self._slice_mat(self.scal_upts[uin], r), 
                         entmin_int=self._slice_mat(self.entmin_int, r),

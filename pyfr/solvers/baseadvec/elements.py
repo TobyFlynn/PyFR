@@ -81,7 +81,7 @@ class BaseAdvectionElements(BaseElements):
         )
         for r in ['mpi', 'core']:
             if r in regions:
-                kernels[f'disu_{r}'] = lambda uin: self._be.kernel(
+                kernels[f'disu_{r}'] = lambda uin, r=r: self._be.kernel(
                     'mul', self.opmat('M0'), self._slice_mat(self.scal_upts[uin], r),
                     out=self._slice_mat(self._scal_fpts, r)
                 )

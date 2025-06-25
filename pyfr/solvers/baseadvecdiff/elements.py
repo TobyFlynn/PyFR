@@ -43,7 +43,7 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
             )
             for r in ['mpi', 'core']:
                 if r in regions:
-                    kernels[f'tgradpcoru_upts_{r}'] = lambda uin: kernel(
+                    kernels[f'tgradpcoru_upts_{r}'] = lambda uin, r=r: kernel(
                         'mul', self.opmat('M4 - M6*M0'), slicem(self.scal_upts[uin], r),
                         out=slicem(self._grad_upts, r)
                     )
@@ -54,7 +54,7 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         )
         for r in ['mpi', 'core']:
             if r in regions:
-                kernels[f'tgradcoru_upts_{r}'] = lambda: kernel(
+                kernels[f'tgradcoru_upts_{r}'] = lambda r=r: kernel(
                     'mul', self.opmat('M6'), slicem(self._comm_fpts, r),
                     out=slicem(self._grad_upts, r), beta=float(self.basis.order > 0)
                 )

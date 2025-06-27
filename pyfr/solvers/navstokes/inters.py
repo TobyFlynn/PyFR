@@ -46,7 +46,7 @@ class NavierStokesIntInters(TplargsMixin,
             ul=self._scal_lhs, ur=self._scal_rhs,
             gradul=self._vect_lhs, gradur=self._vect_rhs,
             artviscl=self._artvisc_lhs, artviscr=self._artvisc_rhs,
-            nl=self._pnorm_lhs
+            nl=self._pnorm_lhs, nr=self._pnorm_rhs
         )
 
 

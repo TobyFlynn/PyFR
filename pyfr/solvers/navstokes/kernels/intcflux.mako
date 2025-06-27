@@ -14,13 +14,19 @@
               gradur='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
               artviscl='in view fpdtype_t'
               artviscr='in view fpdtype_t'
-              nl='in fpdtype_t[${str(ndims)}]'>
+              nl='in fpdtype_t[${str(ndims)}]'
+              nr='in fpdtype_t[${str(ndims)}]'>
     fpdtype_t mag_nl = sqrt(${pyfr.dot('nl[{i}]', i=ndims)});
     fpdtype_t norm_nl[] = ${pyfr.array('(1 / mag_nl)*nl[{i}]', i=ndims)};
+    fpdtype_t mag_nr = sqrt(${pyfr.dot('nr[{i}]', i=ndims)});
+    fpdtype_t norm_nr[] = ${pyfr.array('(1 / mag_nr)*nr[{i}]', i=ndims)};
 
     // Perform the Riemann solve
     fpdtype_t ficomm[${nvars}], fvcomm;
     ${pyfr.expand('rsolve', 'ul', 'ur', 'norm_nl', 'ficomm')};
+
+    fpdtype_t ficomm_r[${nvars}], fvcomm_r;
+    ${pyfr.expand('rsolve', 'ur', 'ul', 'norm_nr', 'ficomm_r')};
 
 % if beta != -0.5:
     fpdtype_t fvl[${ndims}][${nvars}] = {{0}};
@@ -39,6 +45,7 @@
     fvcomm = ${' + '.join(f'norm_nl[{j}]*fvr[{j}][{i}]' for j in range(ndims))};
 % elif beta == 0.5:
     fvcomm = ${' + '.join(f'norm_nl[{j}]*fvl[{j}][{i}]' for j in range(ndims))};
+    fvcomm_r = ${' + '.join(f'norm_nr[{j}]*fvl[{j}][{i}]' for j in range(ndims))};
 % else:
     fvcomm = ${0.5 + beta}*(${' + '.join(f'norm_nl[{j}]*fvl[{j}][{i}]'
                                          for j in range(ndims))})
@@ -50,6 +57,6 @@
 % endif
 
     ul[${i}] =  mag_nl*(ficomm[${i}] + fvcomm);
-    ur[${i}] = -mag_nl*(ficomm[${i}] + fvcomm);
+    ur[${i}] = mag_nr*(ficomm_r[${i}] + fvcomm_r);
 % endfor
 </%pyfr:kernel>

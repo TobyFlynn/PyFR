@@ -38,6 +38,7 @@ class BaseAdvectionIntInters(BaseAdvectionIntersMixin, BaseInters):
 
         # Generate the constant matrices
         self._pnorm_lhs = self._const_mat(lhs, 'get_pnorms_for_inter')
+        self._pnorm_rhs = self._const_mat(rhs, 'get_pnorms_for_inter')
 
     def _gen_perm(self, lhs, rhs):
         # Arbitrarily, take the permutation which results in an optimal

@@ -71,7 +71,7 @@ class BaseElements:
         # Choose whether to use transformed or physcial flux
         self.phyf = self.basis.name == 'pyr'
         # Choose whether to use the free-stream metric smat or not
-        self.fsm = not self.phyf
+        self.fsm = True
         if self.fsm:
             self.smat_at_np = self.smat_fsm_at_np
             self.rcpdjac_at_np = self.rcpdjac_fsm_at_np

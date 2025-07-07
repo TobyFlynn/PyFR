@@ -54,9 +54,10 @@
 % endif
 % if tau != 0.0:
     fvcomm += ${tau}*(ul[${i}] - ur[${i}]);
+    fvcomm_r += ${tau}*(ur[${i}] - ul[${i}]);
 % endif
 
-    ul[${i}] =  mag_nl*(ficomm[${i}] + fvcomm);
+    ul[${i}] = mag_nl*(ficomm[${i}] + fvcomm);
     ur[${i}] = mag_nr*(ficomm_r[${i}] + fvcomm_r);
 % endfor
 </%pyfr:kernel>

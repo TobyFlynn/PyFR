@@ -43,6 +43,12 @@ class BCIntersSurfaceMixin(SurfaceMixin):
         self._norms = {k: np.array(v) for k, v in norms.items()}
         self._rfpts = {k: np.array(v) for k, v in rfpts.items()}
 
+from collections import defaultdict, deque
+from pyfr.quadrules import get_quadrule
+from pyfr.mpiutil import mpi
+from pyfr.inifile import NoOptionError
+from pyfr.plugins.base import init_csv
+import numpy as np
 
 class FluidIntIntersMixin:
     def __init__(self, *args, **kwargs):
@@ -165,3 +171,179 @@ class EulerCharRiemInvBCInters(EulerBaseBCInters):
 
 class EulerSlpAdiaWallBCInters(EulerBaseBCInters):
     type = 'slp-adia-wall'
+
+
+class BCSurfIntMixin:
+    # Setup integrating over boundary
+    def _init_surface_integration(self, system, bc_name):
+        self.ndims = system.ndims
+        self.nvars = system.nvars
+        # Underlying elements class
+        self.elementscls = system.elementscls
+        # Get the mesh and elements
+        mesh, elemap = system.mesh, self.elemap_copy
+        # Interpolation matrices and quadrature weights
+        self._m0 = m0 = {}
+        self._qwts = qwts = defaultdict(list)
+        # Element indices, associated face normals and relative flux
+        # points position with respect to the moments origin
+        eidxs = defaultdict(list)
+        norms = defaultdict(list)
+        rfpts = defaultdict(list)
+
+        for etype, eidx, fidx in mesh.bcon[bc_name]:
+            eles = elemap[etype]
+            itype, proj, norm = eles.basis.faces[fidx]
+
+            ppts, pwts = self._surf_quad(itype, proj, flags='s')
+            nppts = len(ppts)
+
+            # Get phyical normals
+            pnorm = eles.pnorm_at(ppts, [norm]*nppts)[:, eidx]
+
+            eidxs[etype, fidx].append(eidx)
+            norms[etype, fidx].append(pnorm)
+
+            if (etype, fidx) not in m0:
+                m0[etype, fidx] = eles.basis.ubasis.nodal_basis_at(ppts)
+                qwts[etype, fidx] = pwts
+
+        self._eidxs = {k: np.array(v) for k, v in eidxs.items()}
+        self._norms = {k: np.array(v) for k, v in norms.items()}
+        self._rfpts = {k: np.array(v) for k, v in rfpts.items()}
+
+    def _surf_quad(self, itype, proj, flags=''):
+        # Obtain quadrature info
+        rname = self.cfg.get(f'solver-interfaces-{itype}', 'flux-pts')
+
+        # Quadrature rule (default to that of the solution points)
+        qrule = self.cfg.get(self.cfgsect, f'quad-pts-{itype}', rname)
+        try:
+            qdeg = self.cfg.getint(self.cfgsect, f'quad-deg-{itype}')
+        except NoOptionError:
+            qdeg = self.cfg.getint(self.cfgsect, 'quad-deg')
+
+        # Get the quadrature rule
+        q = get_quadrule(itype, qrule, qdeg=qdeg, flags=flags)
+
+        # Project its points onto the provided surface
+        pts = np.atleast_2d(q.pts.T)
+        return np.vstack(np.broadcast_arrays(*proj(*pts))).T, q.wts
+
+class BCMassFlowIntMixin(BCSurfIntMixin):
+    def set_comm(self, bccomm):
+        self.bccomm = bccomm
+
+    def calculate_mass_flow(self, solns):
+        ndims, nvars = self.ndims, self.nvars
+        fm = np.zeros((ndims))
+        # Get the sizes for the area calculation
+        for etype, fidx in self._m0:
+            # Get the interpolation operator
+            m0 = self._m0[etype, fidx]
+            nfpts, nupts = m0.shape
+
+            # Extract the relevant elements from the solution
+            uupts = solns[etype][..., self._eidxs[etype, fidx]]
+
+            # Interpolate to the face
+            ufpts = m0 @ uupts.reshape(nupts, -1)
+            ufpts = ufpts.reshape(nfpts, nvars, -1)
+            ufpts = ufpts.swapaxes(0, 1)
+
+            # Get the quadrature weights and normal vectors
+            qwts = self._qwts[etype, fidx]
+            norms = self._norms[etype, fidx]
+
+            # Do the quadrature for each dimension
+            # RhoU = ufpts[1], RhoV = ufpts[2], RhoW = ufpts[2]
+            for i in range(0, ndims):
+                rhoVel = ufpts[1 + i]
+                fm[i] += np.einsum('i...,ij,ji', qwts, rhoVel, norms[:,:,i])
+        self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
+        return sum(fm)
+
+class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
+    type = 'char-riem-inv-mass-flow'
+    req_mpi_comm = True
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
+        self.cfgsect = cfgsect
+        self.c |= self._exp_opts(
+            ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
+        )
+
+        self.target_mfr = self.cfg.getfloat(cfgsect, 'mass-flow-rate')
+        # When to start the mass flow controller
+        self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
+        # Start p value
+        self.p = self.cfg.getfloat(cfgsect, 'p')
+        self.outlet_bc_name = cfgsect[9:]
+        # Mass flow history
+        self.mf_hist_len = 100
+        self.mf_hist = deque(maxlen=self.mf_hist_len)
+        # Parameter to control the strength of the controller
+        self.eta = self.cfg.getfloat(cfgsect, 'eta', 1e6)
+        # Frequency that mf.csv should be updated
+        self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
+        self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
+        self.nstep_counter = 0
+        self.nflush_counter = 0
+
+        self._set_external('var_p', 'scalar fpdtype_t')
+        self.tprev = -1.0
+        self.dpdt = 0.0
+        self.init = False
+        self.elemap_copy = elemap
+
+    def update_mf(self, solns):
+        mf = self.calculate_mass_flow(solns)
+        self.mf_hist.append(mf)
+
+    def avg_mf(self):
+        return np.mean(self.mf_hist) if self.mf_hist else 0.0
+
+    def update_p(self, dt):
+        avg_mf = self.avg_mf()
+        self.p += dt * self.eta * (1.0 - self.target_mfr / avg_mf)
+
+    def prepare(self, t, system, soln):
+        # Check if first prepare call
+        if not self.init:
+            self._init_surface_integration(system, self.outlet_bc_name)
+            del self.elemap_copy
+            if self.bccomm.rank == 0:
+                self.outf = init_csv(self.cfg, self.cfgsect, 't,mf,pbc')
+            self.init = True
+
+        # Check if past tstart
+        if t < self.tstart:
+            system.update_rt_extern('var_p', self.p)
+            return
+
+        if self.nstep_counter % self.nsteps == 0:
+            solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
+            self.update_mf(solns)
+            # First update to begin history
+            if self.tprev < 0.0:
+                self.tprev = t
+                system.update_rt_extern('var_p', self.p)
+                return
+
+            self.update_p(t - self.tprev)
+            system.update_rt_extern('var_p', self.p)
+            self.tprev = t
+
+            # Output mass flow and pressure at outflow
+            if self.bccomm.rank == 0:
+                print(f'{t},{self.avg_mf()},{self.p}', file=self.outf)
+            self.nflush_counter = self.nflush_counter + 1
+        else:
+            system.update_rt_extern('var_p', self.p)
+
+        # Flush to file
+        if self.nflush_counter % self.nflush == 0:
+            if self.bccomm.rank == 0:
+                self.outf.flush()
+        self.nstep_counter = self.nstep_counter + 1

@@ -222,9 +222,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(BCMassFlowIntMixin,
     cflux_state = 'ghost'
 
     def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
-        super().__init__(be, lhs, elemap, cfgsect, cfg)
-        self.bccomm = bccomm
-        self.cfgsect = cfgsect
+        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
+
         self.c |= self._exp_opts(
             ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
         )
@@ -235,20 +234,19 @@ class NavierStokesCharRiemInvMassFlowBCInters(BCMassFlowIntMixin,
         # Start p value
         self.p = be.matrix((1,1))
         self.p.set(np.array([[self.cfg.getfloat(cfgsect, 'p')]]))
-        self.outlet_bc_name = cfgsect[9:]
+        self.bcname = cfgsect.removeprefix('soln-bcs-')
         # Mass flow history
-        self.mf_hist_len = 100
-        self.mf_hist = deque(maxlen=self.mf_hist_len)
+        self.mf_hist = deque(maxlen=100)
         # Parameter to control the strength of the controller
-        self.eta = self.cfg.getfloat(cfgsect, 'eta', 1e6)
+        self.eta = self.cfg.getfloat(cfgsect, 'eta')
         # Frequency that mf.csv should be updated
         self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
         self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
-        self.nstep_counter = 0
-        self.nflush_counter = 0
 
         self._set_external('var_p', 'in broadcast fpdtype_t[1][1]', value=self.p)
         self.tprev = -1.0
+        self.nstep_counter = 0
+        self.nflush_counter = 0
         self.init = False
         self.elemap_copy = elemap
 
@@ -271,7 +269,7 @@ class NavierStokesCharRiemInvMassFlowBCInters(BCMassFlowIntMixin,
     def prepare(self, t, system, soln):
         # Check if first prepare call
         if not self.init:
-            self._init_surface_integration(system, self.outlet_bc_name)
+            self._init_surface_integration(system, self.bcname)
             del self.elemap_copy
             self.init = True
 

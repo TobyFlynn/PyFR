@@ -175,7 +175,7 @@ class EulerSlpAdiaWallBCInters(EulerBaseBCInters):
 
 class BCSurfIntMixin:
     # Setup integrating over boundary
-    def _init_surface_integration(self, system, bc_name):
+    def _init_surface_integration(self, system, bcname):
         self.ndims = system.ndims
         self.nvars = system.nvars
         # Underlying elements class
@@ -191,7 +191,7 @@ class BCSurfIntMixin:
         norms = defaultdict(list)
         rfpts = defaultdict(list)
 
-        for etype, eidx, fidx in mesh.bcon[bc_name]:
+        for etype, eidx, fidx in mesh.bcon[bcname]:
             eles = elemap[etype]
             itype, proj, norm = eles.basis.faces[fidx]
 
@@ -264,9 +264,8 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
     type = 'char-riem-inv-mass-flow'
 
     def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
-        super().__init__(be, lhs, elemap, cfgsect, cfg)
-        self.bccomm = bccomm
-        self.cfgsect = cfgsect
+        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
+
         self.c |= self._exp_opts(
             ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
         )
@@ -277,21 +276,19 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
         # Start p value
         self.p = be.matrix((1,1))
         self.p.set(np.array([[self.cfg.getfloat(cfgsect, 'p')]]))
-        self.outlet_bc_name = cfgsect[9:]
+        self.bcname = cfgsect.removeprefix('soln-bcs-')
         # Mass flow history
-        self.mf_hist_len = 100
-        self.mf_hist = deque(maxlen=self.mf_hist_len)
+        self.mf_hist = deque(maxlen=100)
         # Parameter to control the strength of the controller
-        self.eta = self.cfg.getfloat(cfgsect, 'eta', 1e6)
+        self.eta = self.cfg.getfloat(cfgsect, 'eta')
         # Frequency that mf.csv should be updated
         self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
         self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
-        self.nstep_counter = 0
-        self.nflush_counter = 0
 
         self._set_external('var_p', 'in broadcast fpdtype_t[1][1]', value=self.p)
         self.tprev = -1.0
-        self.dpdt = 0.0
+        self.nstep_counter = 0
+        self.nflush_counter = 0
         self.init = False
         self.elemap_copy = elemap
 
@@ -314,7 +311,7 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
     def prepare(self, t, system, soln):
         # Check if first prepare call
         if not self.init:
-            self._init_surface_integration(system, self.outlet_bc_name)
+            self._init_surface_integration(system, self.bcname)
             del self.elemap_copy
             self.init = True
 

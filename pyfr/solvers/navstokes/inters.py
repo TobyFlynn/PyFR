@@ -215,13 +215,14 @@ class NavierStokesSubOutflowBCInters(NavierStokesBaseBCInters):
 
         self.c |= self._exp_opts(['p'], lhs)
 
+
 class NavierStokesCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, 
                                               NavierStokesBaseBCInters):
     type = 'char-riem-inv-mass-flow'
     cflux_state = 'ghost'
 
     def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
-        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
         self.bccomm = bccomm
         self.cfgsect = cfgsect
         self.c |= self._exp_opts(

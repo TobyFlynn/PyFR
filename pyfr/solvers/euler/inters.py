@@ -231,9 +231,6 @@ class BCSurfIntMixin:
         return np.vstack(np.broadcast_arrays(*proj(*pts))).T, q.wts
 
 class BCMassFlowIntMixin(BCSurfIntMixin):
-    def set_comm(self, bccomm):
-        self.bccomm = bccomm
-
     def calculate_mass_flow(self, solns):
         ndims, nvars = self.ndims, self.nvars
         fm = np.zeros((ndims))
@@ -267,7 +264,7 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
     type = 'char-riem-inv-mass-flow'
 
     def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
-        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
         self.bccomm = bccomm
         self.cfgsect = cfgsect
         self.c |= self._exp_opts(

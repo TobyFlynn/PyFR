@@ -26,7 +26,6 @@ class BaseSystem:
         self.mesh = mesh
         self.cfg = cfg
         self.nregs = nregs
-        self.rt_externs = {}
 
         # Conservative and physical variable names
         convars = self.elementscls.convars(mesh.ndims, cfg)
@@ -276,7 +275,7 @@ class BaseSystem:
             b.prepare(self, uinbank, t, bckerns[b.name])
 
         for b in binders:
-            b(**self.rt_externs)
+            b(t=t)
 
     def _rhs_graphs(self, uinbank, foutbank):
         pass
@@ -357,6 +356,3 @@ class BaseSystem:
     def set_ele_entmin_int(self, entmin_int):
         for e, em in zip(self.eles_entmin_int, entmin_int):
             e.set(em)
-    
-    def update_rt_extern(self, key, value):
-        self.rt_externs[key] = value

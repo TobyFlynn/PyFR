@@ -265,10 +265,10 @@ class BCMassFlowIntMixin(BCSurfIntMixin):
 
 class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
     type = 'char-riem-inv-mass-flow'
-    req_mpi_comm = True
 
-    def __init__(self, be, lhs, elemap, cfgsect, cfg):
-        super().__init__(be, lhs, elemap, cfgsect, cfg)
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
+        self.bccomm = bccomm
         self.cfgsect = cfgsect
         self.c |= self._exp_opts(
             ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
@@ -278,7 +278,8 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
         # When to start the mass flow controller
         self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
         # Start p value
-        self.p = self.cfg.getfloat(cfgsect, 'p')
+        self.p = be.matrix((1,1))
+        self.p.set(np.array([[self.cfg.getfloat(cfgsect, 'p')]]))
         self.outlet_bc_name = cfgsect[9:]
         # Mass flow history
         self.mf_hist_len = 100
@@ -291,11 +292,14 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
         self.nstep_counter = 0
         self.nflush_counter = 0
 
-        self._set_external('var_p', 'scalar fpdtype_t')
+        self._set_external('var_p', 'in broadcast fpdtype_t[1][1]', value=self.p)
         self.tprev = -1.0
         self.dpdt = 0.0
         self.init = False
         self.elemap_copy = elemap
+
+        if self.bccomm.rank == 0:
+            self.outf = init_csv(self.cfg, self.cfgsect, 't,mf,pbc')
 
     def update_mf(self, solns):
         mf = self.calculate_mass_flow(solns)
@@ -306,20 +310,19 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
 
     def update_p(self, dt):
         avg_mf = self.avg_mf()
-        self.p += dt * self.eta * (1.0 - self.target_mfr / avg_mf)
+        p = self.p.get()[0][0]
+        p += dt * self.eta * (1.0 - self.target_mfr / avg_mf)
+        self.p.set(np.array([[p]]))
 
     def prepare(self, t, system, soln):
         # Check if first prepare call
         if not self.init:
             self._init_surface_integration(system, self.outlet_bc_name)
             del self.elemap_copy
-            if self.bccomm.rank == 0:
-                self.outf = init_csv(self.cfg, self.cfgsect, 't,mf,pbc')
             self.init = True
 
         # Check if past tstart
         if t < self.tstart:
-            system.update_rt_extern('var_p', self.p)
             return
 
         if self.nstep_counter % self.nsteps == 0:
@@ -328,19 +331,15 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
             # First update to begin history
             if self.tprev < 0.0:
                 self.tprev = t
-                system.update_rt_extern('var_p', self.p)
                 return
 
             self.update_p(t - self.tprev)
-            system.update_rt_extern('var_p', self.p)
             self.tprev = t
 
             # Output mass flow and pressure at outflow
             if self.bccomm.rank == 0:
-                print(f'{t},{self.avg_mf()},{self.p}', file=self.outf)
+                print(f'{t},{self.avg_mf()},{self.p.get()[0][0]}', file=self.outf)
             self.nflush_counter = self.nflush_counter + 1
-        else:
-            system.update_rt_extern('var_p', self.p)
 
         # Flush to file
         if self.nflush_counter % self.nflush == 0:

@@ -126,7 +126,7 @@ def main():
     ap_export = sp.add_parser('export', help='export --help')
     ap_export = ap_export.add_subparsers()
 
-    for etype in ('boundary', 'stl', 'volume'):
+    for etype in ('boundary', 'stl', 'volume', 'spanavg'):
         ap_export_type = ap_export.add_parser(etype,
                                               help=f'export {etype} --help')
 

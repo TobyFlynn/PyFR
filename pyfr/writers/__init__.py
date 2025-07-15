@@ -1,6 +1,6 @@
 from pyfr.util import subclasses, subclass_where
 from pyfr.writers.base import BaseWriter
-from pyfr.writers.vtk import VTKBoundaryWriter, VTKSTLWriter, VTKVolumeWriter
+from pyfr.writers.vtk import VTKBoundaryWriter, VTKSTLWriter, VTKVolumeWriter, VTKSpanAvgWriter
 
 
 def get_writer_by_name(name, type, /, *kargs, **kwargs):

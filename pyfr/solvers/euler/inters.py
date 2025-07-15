@@ -174,10 +174,11 @@ class EulerSlpAdiaWallBCInters(EulerBaseBCInters):
 
 
 class BCSurfIntMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     # Setup integrating over boundary
     def _init_surface_integration(self, system, bcname):
-        self.ndims = system.ndims
-        self.nvars = system.nvars
         # Underlying elements class
         self.elementscls = system.elementscls
         # Get the mesh and elements
@@ -230,7 +231,40 @@ class BCSurfIntMixin:
         pts = np.atleast_2d(q.pts.T)
         return np.vstack(np.broadcast_arrays(*proj(*pts))).T, q.wts
 
-class BCMassFlowIntMixin(BCSurfIntMixin):
+class MassFlowBCMixin(BCSurfIntMixin):
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
+
+        self.c |= self._exp_opts(
+            ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
+        )
+
+        self.target_mfr = self.cfg.getfloat(cfgsect, 'mass-flow-rate')
+        # When to start the mass flow controller
+        self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
+        # Start p value
+        self.p = be.matrix((1,1))
+        self.p.set(np.array([[self.cfg.getfloat(cfgsect, 'p')]]))
+        self.bcname = cfgsect.removeprefix('soln-bcs-')
+        # Mass flow history
+        self.mf_hist = deque(maxlen=100)
+        # Parameter to control the strength of the controller
+        self.eta = self.cfg.getfloat(cfgsect, 'eta')
+        # Frequency that mf.csv should be updated
+        self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
+        self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
+
+        self._set_external('var_p', 'in broadcast fpdtype_t[1][1]', 
+                           value=self.p)
+        self.tprev = -1.0
+        self.nstep_counter = 0
+        self.nflush_counter = 0
+        self.init = False
+        self.elemap_copy = elemap
+
+        if self.bccomm.rank == 0:
+            self.outf = init_csv(self.cfg, self.cfgsect, 't,mf,pbc')
+
     def calculate_mass_flow(self, solns):
         ndims, nvars = self.ndims, self.nvars
         fm = np.zeros((ndims))
@@ -259,51 +293,13 @@ class BCMassFlowIntMixin(BCSurfIntMixin):
                 fm[i] += np.einsum('i...,ij,ji', qwts, rhoVel, norms[:,:,i])
         self.bccomm.Allreduce(mpi.IN_PLACE, fm, op=mpi.SUM)
         return sum(fm)
-
-class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
-    type = 'char-riem-inv-mass-flow'
-
-    def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
-        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
-
-        self.c |= self._exp_opts(
-            ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
-        )
-
-        self.target_mfr = self.cfg.getfloat(cfgsect, 'mass-flow-rate')
-        # When to start the mass flow controller
-        self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
-        # Start p value
-        self.p = be.matrix((1,1))
-        self.p.set(np.array([[self.cfg.getfloat(cfgsect, 'p')]]))
-        self.bcname = cfgsect.removeprefix('soln-bcs-')
-        # Mass flow history
-        self.mf_hist = deque(maxlen=100)
-        # Parameter to control the strength of the controller
-        self.eta = self.cfg.getfloat(cfgsect, 'eta')
-        # Frequency that mf.csv should be updated
-        self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
-        self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
-
-        self._set_external('var_p', 'in broadcast fpdtype_t[1][1]', value=self.p)
-        self.tprev = -1.0
-        self.nstep_counter = 0
-        self.nflush_counter = 0
-        self.init = False
-        self.elemap_copy = elemap
-
-        if self.bccomm.rank == 0:
-            self.outf = init_csv(self.cfg, self.cfgsect, 't,mf,pbc')
-
+    
     def update_mf(self, solns):
         mf = self.calculate_mass_flow(solns)
         self.mf_hist.append(mf)
 
-    def avg_mf(self):
-        return np.mean(self.mf_hist) if self.mf_hist else 0.0
-
     def update_p(self, dt):
-        avg_mf = self.avg_mf()
+        avg_mf = np.mean(self.mf_hist)
         p = self.p.get()[0][0]
         p += dt * self.eta * (1.0 - self.target_mfr / avg_mf)
         self.p.set(np.array([[p]]))
@@ -332,7 +328,8 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
 
             # Output mass flow and pressure at outflow
             if self.bccomm.rank == 0:
-                print(f'{t},{self.avg_mf()},{self.p.get()[0][0]}', file=self.outf)
+                print(f'{t},{np.mean(self.mf_hist)},{self.p.get()[0][0]}', 
+                      file=self.outf)
             self.nflush_counter = self.nflush_counter + 1
 
         # Flush to file
@@ -340,3 +337,9 @@ class EulerCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, EulerBaseBCInters):
             if self.bccomm.rank == 0:
                 self.outf.flush()
         self.nstep_counter = self.nstep_counter + 1
+
+class EulerCharRiemInvMassFlowBCInters(MassFlowBCMixin, EulerBaseBCInters):
+    type = 'char-riem-inv-mass-flow'
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)

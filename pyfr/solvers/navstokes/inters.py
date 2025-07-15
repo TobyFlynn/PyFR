@@ -5,7 +5,7 @@ from pyfr.solvers.baseadvecdiff import (BaseAdvectionDiffusionBCInters,
                                         BaseAdvectionDiffusionMPIInters)
 from pyfr.solvers.euler.inters import (FluidIntIntersMixin,
                                        FluidMPIIntersMixin,
-                                       BCMassFlowIntMixin)
+                                       MassFlowBCMixin)
 
 from collections import deque
 from pyfr.plugins.base import init_csv
@@ -216,85 +216,10 @@ class NavierStokesSubOutflowBCInters(NavierStokesBaseBCInters):
         self.c |= self._exp_opts(['p'], lhs)
 
 
-class NavierStokesCharRiemInvMassFlowBCInters(BCMassFlowIntMixin, 
+class NavierStokesCharRiemInvMassFlowBCInters(MassFlowBCMixin, 
                                               NavierStokesBaseBCInters):
     type = 'char-riem-inv-mass-flow'
     cflux_state = 'ghost'
 
     def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
         super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
-
-        self.c |= self._exp_opts(
-            ['rho', 'u', 'v', 'w'][:self.ndims + 1], lhs
-        )
-
-        self.target_mfr = self.cfg.getfloat(cfgsect, 'mass-flow-rate')
-        # When to start the mass flow controller
-        self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
-        # Start p value
-        self.p = be.matrix((1,1))
-        self.p.set(np.array([[self.cfg.getfloat(cfgsect, 'p')]]))
-        self.bcname = cfgsect.removeprefix('soln-bcs-')
-        # Mass flow history
-        self.mf_hist = deque(maxlen=100)
-        # Parameter to control the strength of the controller
-        self.eta = self.cfg.getfloat(cfgsect, 'eta')
-        # Frequency that mf.csv should be updated
-        self.nsteps = self.cfg.getint(cfgsect, 'nsteps', 100)
-        self.nflush = self.cfg.getint(cfgsect, 'nflush', 10)
-
-        self._set_external('var_p', 'in broadcast fpdtype_t[1][1]', value=self.p)
-        self.tprev = -1.0
-        self.nstep_counter = 0
-        self.nflush_counter = 0
-        self.init = False
-        self.elemap_copy = elemap
-
-        if self.bccomm.rank == 0:
-            self.outf = init_csv(self.cfg, self.cfgsect, 't,mf,pbc')
-
-    def update_mf(self, solns):
-        mf = self.calculate_mass_flow(solns)
-        self.mf_hist.append(mf)
-
-    def avg_mf(self):
-        return np.mean(self.mf_hist) if self.mf_hist else 0.0
-
-    def update_p(self, dt):
-        avg_mf = self.avg_mf()
-        p = self.p.get()[0][0]
-        p += dt * self.eta * (1.0 - self.target_mfr / avg_mf)
-        self.p.set(np.array([[p]]))
-
-    def prepare(self, t, system, soln):
-        # Check if first prepare call
-        if not self.init:
-            self._init_surface_integration(system, self.bcname)
-            del self.elemap_copy
-            self.init = True
-
-        # Check if past tstart
-        if t < self.tstart:
-            return
-
-        if self.nstep_counter % self.nsteps == 0:
-            solns = dict(zip(system.ele_types, system.ele_scal_upts(soln)))
-            self.update_mf(solns)
-            # First update to begin history
-            if self.tprev < 0.0:
-                self.tprev = t
-                return
-
-            self.update_p(t - self.tprev)
-            self.tprev = t
-
-            # Output mass flow and pressure at outflow
-            if self.bccomm.rank == 0:
-                print(f'{t},{self.avg_mf()},{self.p.get()[0][0]}', file=self.outf)
-            self.nflush_counter = self.nflush_counter + 1
-
-        # Flush to file
-        if self.nflush_counter % self.nflush == 0:
-            if self.bccomm.rank == 0:
-                self.outf.flush()
-        self.nstep_counter = self.nstep_counter + 1

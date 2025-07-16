@@ -4,9 +4,8 @@
 <% gamma = c['gamma'] %>
 
 <%pyfr:macro name='bc_rsolve_state' params='ul, nl, ur' externs='ploc, t, var_p'>
-    fpdtype_t p = var_p[0][0];
-    fpdtype_t cs = sqrt(${gamma}*p/${c['rho']});
-    fpdtype_t s = p*pow(${c['rho']}, -${gamma});
+    fpdtype_t cs = sqrt(${gamma}*var_p/${c['rho']});
+    fpdtype_t s = var_p*pow(${c['rho']}, -${gamma});
     fpdtype_t ratio = cs*${2.0/gmo};
 
     fpdtype_t inv = 1.0/ul[0];

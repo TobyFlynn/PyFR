@@ -244,7 +244,7 @@ class MassFlowBCMixin(BCIntersSurfaceMixin):
         for k in kerns:
             kerns[k].bind(var_p=self.p)
 
-    def prepare(self, system, t, kerns):
+    def prepare(self, system, ubank, t, kerns):
         # Check if first prepare call
         if not self.init:
             self._init_surface_integration(system, self.elemap_copy, self.bcname)
@@ -257,7 +257,7 @@ class MassFlowBCMixin(BCIntersSurfaceMixin):
             return
 
         if self.nstep_counter % self.nsteps == 0:
-            solns = dict(zip(system.ele_types, system.ele_scal_upts(0)))
+            solns = dict(zip(system.ele_types, system.ele_scal_upts(ubank)))
             # First update to begin history
             if self.tprev < 0.0:
                 self.tprev = t

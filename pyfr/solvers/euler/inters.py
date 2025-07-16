@@ -185,8 +185,9 @@ class MassFlowBCMixin(BCIntersSurfaceMixin):
         # Start p value
         self.p = self.cfg.getfloat(cfgsect, 'p')
         self.bcname = cfgsect.removeprefix('soln-bcs-')
-        # Mass flow history
-        self.mf_hist = deque(maxlen=100)
+        # Mass flow average
+        self.mf_avg = 0.0
+        self.mf_alpha = 0.4
         # Parameter to control the strength of the controller
         self.eta = self.cfg.getfloat(cfgsect, 'eta')
         # Frequency that mf.csv should be updated
@@ -234,11 +235,10 @@ class MassFlowBCMixin(BCIntersSurfaceMixin):
     
     def update_mf(self, solns):
         mf = self.calculate_mass_flow(solns)
-        self.mf_hist.append(mf)
+        self.mf_avg = self.mf_alpha * mf + (1.0 - self.mf_alpha) * self.mf_avg
 
     def update_p(self, dt):
-        avg_mf = np.mean(self.mf_hist)
-        self.p += dt * self.eta * (1.0 - self.target_mfr / avg_mf)
+        self.p += dt * self.eta * (1.0 - self.target_mfr / self.mf_avg)
     
     def bind_p(self, kerns):
         for k in kerns:
@@ -258,19 +258,20 @@ class MassFlowBCMixin(BCIntersSurfaceMixin):
 
         if self.nstep_counter % self.nsteps == 0:
             solns = dict(zip(system.ele_types, system.ele_scal_upts(0)))
-            self.update_mf(solns)
             # First update to begin history
             if self.tprev < 0.0:
                 self.tprev = t
+                self.mf_avg = self.calculate_mass_flow(solns)
                 self.bind_p(kerns)
                 return
 
+            self.update_mf(solns)
             self.update_p(t - self.tprev)
             self.tprev = t
 
             # Output mass flow and pressure at outflow
             if self.bccomm.rank == 0:
-                print(f'{t},{np.mean(self.mf_hist)},{self.p}', 
+                print(f'{t},{self.mf_avg},{self.p}', 
                       file=self.outf)
             self.nflush_counter = self.nflush_counter + 1
         self.bind_p(kerns)

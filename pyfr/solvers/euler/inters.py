@@ -1,7 +1,12 @@
-from pyfr.plugins.base import SurfaceMixin
+from collections import defaultdict, deque
+import numpy as np
+
+from pyfr.mpiutil import mpi
+from pyfr.plugins.base import init_csv, SurfaceMixin
 from pyfr.solvers.baseadvec import (BaseAdvectionIntInters,
                                     BaseAdvectionMPIInters,
                                     BaseAdvectionBCInters)
+
 
 class BCIntersSurfaceMixin(SurfaceMixin):
     def __init__(self, *args, **kwargs):
@@ -42,13 +47,6 @@ class BCIntersSurfaceMixin(SurfaceMixin):
         self._eidxs = {k: np.array(v) for k, v in eidxs.items()}
         self._norms = {k: np.array(v) for k, v in norms.items()}
         self._rfpts = {k: np.array(v) for k, v in rfpts.items()}
-
-from collections import defaultdict, deque
-from pyfr.quadrules import get_quadrule
-from pyfr.mpiutil import mpi
-from pyfr.inifile import NoOptionError
-from pyfr.plugins.base import init_csv
-import numpy as np
 
 class FluidIntIntersMixin:
     def __init__(self, *args, **kwargs):
@@ -173,65 +171,7 @@ class EulerSlpAdiaWallBCInters(EulerBaseBCInters):
     type = 'slp-adia-wall'
 
 
-class BCSurfIntMixin:
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    # Setup integrating over boundary
-    def _init_surface_integration(self, system, bcname):
-        # Underlying elements class
-        self.elementscls = system.elementscls
-        # Get the mesh and elements
-        mesh, elemap = system.mesh, self.elemap_copy
-        # Interpolation matrices and quadrature weights
-        self._m0 = m0 = {}
-        self._qwts = qwts = defaultdict(list)
-        # Element indices, associated face normals and relative flux
-        # points position with respect to the moments origin
-        eidxs = defaultdict(list)
-        norms = defaultdict(list)
-        rfpts = defaultdict(list)
-
-        for etype, eidx, fidx in mesh.bcon[bcname]:
-            eles = elemap[etype]
-            itype, proj, norm = eles.basis.faces[fidx]
-
-            ppts, pwts = self._surf_quad(itype, proj, flags='s')
-            nppts = len(ppts)
-
-            # Get phyical normals
-            pnorm = eles.pnorm_at(ppts, [norm]*nppts)[:, eidx]
-
-            eidxs[etype, fidx].append(eidx)
-            norms[etype, fidx].append(pnorm)
-
-            if (etype, fidx) not in m0:
-                m0[etype, fidx] = eles.basis.ubasis.nodal_basis_at(ppts)
-                qwts[etype, fidx] = pwts
-
-        self._eidxs = {k: np.array(v) for k, v in eidxs.items()}
-        self._norms = {k: np.array(v) for k, v in norms.items()}
-        self._rfpts = {k: np.array(v) for k, v in rfpts.items()}
-
-    def _surf_quad(self, itype, proj, flags=''):
-        # Obtain quadrature info
-        rname = self.cfg.get(f'solver-interfaces-{itype}', 'flux-pts')
-
-        # Quadrature rule (default to that of the solution points)
-        qrule = self.cfg.get(self.cfgsect, f'quad-pts-{itype}', rname)
-        try:
-            qdeg = self.cfg.getint(self.cfgsect, f'quad-deg-{itype}')
-        except NoOptionError:
-            qdeg = self.cfg.getint(self.cfgsect, 'quad-deg')
-
-        # Get the quadrature rule
-        q = get_quadrule(itype, qrule, qdeg=qdeg, flags=flags)
-
-        # Project its points onto the provided surface
-        pts = np.atleast_2d(q.pts.T)
-        return np.vstack(np.broadcast_arrays(*proj(*pts))).T, q.wts
-
-class MassFlowBCMixin(BCSurfIntMixin):
+class MassFlowBCMixin(BCIntersSurfaceMixin):
     def __init__(self, be, lhs, elemap, cfgsect, cfg, bccomm):
         super().__init__(be, lhs, elemap, cfgsect, cfg, bccomm)
 
@@ -307,7 +247,7 @@ class MassFlowBCMixin(BCSurfIntMixin):
     def prepare(self, t, system, soln):
         # Check if first prepare call
         if not self.init:
-            self._init_surface_integration(system, self.bcname)
+            self._init_surface_integration(system, self.elemap_copy, self.bcname)
             del self.elemap_copy
             self.init = True
 
@@ -337,6 +277,7 @@ class MassFlowBCMixin(BCSurfIntMixin):
             if self.bccomm.rank == 0:
                 self.outf.flush()
         self.nstep_counter = self.nstep_counter + 1
+
 
 class EulerCharRiemInvMassFlowBCInters(MassFlowBCMixin, EulerBaseBCInters):
     type = 'char-riem-inv-mass-flow'

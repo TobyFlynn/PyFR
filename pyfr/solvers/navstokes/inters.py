@@ -7,10 +7,6 @@ from pyfr.solvers.euler.inters import (FluidIntIntersMixin,
                                        FluidMPIIntersMixin,
                                        MassFlowBCMixin)
 
-from collections import deque
-from pyfr.plugins.base import init_csv
-import numpy as np
-
 
 class TplargsMixin:
     def __init__(self, *args, **kwargs):

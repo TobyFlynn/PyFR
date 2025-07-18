@@ -48,6 +48,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, TavgMixin, BaseSolnPlugin):
 
         # Primitive variables
         self.privars = first(intg.system.ele_map.values()).privars
+        self.privars.append('zeta')
 
         # Averaging mode
         self.mode = self.cfg.get(cfgsect, 'mode', 'windowed')
@@ -182,6 +183,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, TavgMixin, BaseSolnPlugin):
 
             # Convert from conservative to primitive variables
             psolns = self.elementscls.con_to_pri(soln, self.cfg)
+            # Repeat zeta within an element so there is a value for every solution point
+            zeta_repeated = np.tile(intg.system.get_ele_zeta()[0], (psolns[0].shape[0],1))
+            psolns.append(zeta_repeated)
 
             # Prepare the substitutions dictionary
             subs = dict(zip(self.privars, psolns))

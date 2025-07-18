@@ -157,6 +157,8 @@ class BaseAdvectionElements(BaseElements):
             self.entmin_int = self._be.matrix((self.nfaces, self.neles),
                                               tags=tags, extent=ext,
                                               initval=entmin_int)
+            self.zeta = self._be.matrix((1, self.neles),
+                                        tags=tags, extent=nonce + 'zeta')
 
             # Setup nodal/modal operator matrices
             form = self.cfg.get('solver-entropy-filter', 'formulation',

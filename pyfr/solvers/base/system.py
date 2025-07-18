@@ -65,6 +65,9 @@ class BaseSystem:
 
         if hasattr(eles[0], 'entmin_int'):
             self.eles_entmin_int = [e.entmin_int for e in eles]
+        
+        if hasattr(eles[0], 'zeta'):
+            self.eles_zeta = [e.zeta for e in eles]
 
         # Load the interfaces
         self._int_inters = self._load_int_inters(mesh, elemap)
@@ -342,6 +345,9 @@ class BaseSystem:
 
     def get_ele_entmin_int(self):
         return [e.get() for e in self.eles_entmin_int]
+    
+    def get_ele_zeta(self):
+        return [e.get() for e in self.eles_zeta]
 
     def _group(self, g, kerns, subs=[]):
         # Eliminate non-existent kernels
@@ -355,4 +361,8 @@ class BaseSystem:
 
     def set_ele_entmin_int(self, entmin_int):
         for e, em in zip(self.eles_entmin_int, entmin_int):
+            e.set(em)
+    
+    def set_ele_zeta(self, zeta):
+        for e, em in zip(self.eles_zeta, zeta):
             e.set(em)

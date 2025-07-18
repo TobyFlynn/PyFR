@@ -89,7 +89,8 @@
               entmin_int='inout fpdtype_t[${str(nfaces)}]'
               vdm='in broadcast fpdtype_t[${str(nefpts)}][${str(nupts)}]'
               invvdm='in broadcast fpdtype_t[${str(nupts)}][${str(nupts)}]'
-              m0='in broadcast fpdtype_t[${str(nfpts)}][${str(nupts)}]'>
+              m0='in broadcast fpdtype_t[${str(nfpts)}][${str(nupts)}]'
+              zeta='inout fpdtype_t'>
     fpdtype_t dmin, pmin, emin;
 
     // Compute minimum entropy from current and adjacent elements
@@ -114,11 +115,13 @@
 
         // Apply density, pressure, and entropy limiting sequentially
         fpdtype_t alpha;
+        zeta = 0.0;
         % for (fvar, bound) in [('d', d_min), ('p', p_min), ('e', f'entmin - {e_tol}')]:
         if (${fvar}min < ${bound}) 
         {
             alpha = (${fvar}min - (${bound}))/(${fvar}min - ${fvar}avg);
             alpha = fmin(fmax(alpha, 0.0), 1.0);
+            zeta = fmax(zeta, alpha);
 
             % for uidx, vidx in pyfr.ndrange(nupts, 1 if fvar == 'd' else nvars):
             u[${uidx}][${vidx}] += alpha*(uavg[${vidx}] - u[${uidx}][${vidx}]);
@@ -184,6 +187,7 @@
                 // Set current minimum f as the bounds-preserving value
                 f = f_low;
             }
+            zeta = -log(fmax(f,1.0e-12));
         }
 
         // Filter full solution with bounds-preserving f value

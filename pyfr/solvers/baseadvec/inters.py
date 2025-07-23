@@ -173,3 +173,67 @@ class BaseAdvectionBCInters(BaseAdvectionIntersMixin, BaseInters):
             self._set_external('ploc', spec, value=value)
 
         return exprs
+
+
+class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
+    type = None
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+        super().__init__(be, lhs, elemap, cfg)
+
+        self.cfgsect = cfgsect
+        self.name = cfgsect.removeprefix('soln-sliding-interface-')
+
+        # For BC interfaces, which only have an LHS state, we take the
+        # permutation which results in an optimal memory access pattern
+        # iterating over this state.
+        self._perm = self._get_perm_for_view(lhs, 'get_scal_fpts_for_inter')
+
+        # LHS view and constant matrices
+        self._scal_lhs = self._scal_view(lhs, 'get_scal_fpts_for_inter')
+        self._pnorm_lhs = self._const_mat(lhs, 'get_pnorms_for_inter')
+
+        # Make the simulation time available inside kernels
+        self._set_external('t', 'scalar fpdtype_t')
+
+        if self._ef_enabled:
+            self._entmin_lhs = self._view(lhs, 'get_entmin_bc_fpts_for_inter')
+        else:
+            self._entmin_lhs = None
+
+    def _eval_opts(self, opts, default=None):
+        # Boundary conditions, much like initial conditions, can be
+        # parameterized by values in [constants] so we must bring these
+        # into scope when evaluating the boundary conditions
+        cc = self.cfg.items_as('constants', float)
+
+        cfg, sect = self.cfg, self.cfgsect
+
+        # Evaluate any BC specific arguments from the config file
+        if default is not None:
+            return [npeval(cfg.getexpr(sect, k, default), cc) for k in opts]
+        else:
+            return [npeval(cfg.getexpr(sect, k), cc) for k in opts]
+
+    def _exp_opts(self, opts, lhs, default={}):
+        cfg, sect = self.cfg, self.cfgsect
+
+        subs = cfg.items('constants')
+        subs |= dict(x='ploc[0]', y='ploc[1]', z='ploc[2]')
+        subs |= dict(abs='fabs', pi=str(math.pi))
+
+        exprs = {}
+        for k in opts:
+            if k in default:
+                exprs[k] = cfg.getexpr(sect, k, default[k], subs=subs)
+            else:
+                exprs[k] = cfg.getexpr(sect, k, subs=subs)
+
+        if (any('ploc' in ex for ex in exprs.values()) and
+            'ploc' not in self._external_args):
+            spec = f'in fpdtype_t[{self.ndims}]'
+            value = self._const_mat(lhs, 'get_ploc_for_inter')
+
+            self._set_external('ploc', spec, value=value)
+
+        return exprs

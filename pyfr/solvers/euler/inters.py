@@ -1,11 +1,12 @@
+import numpy as np
+
 from pyfr.mpiutil import mpi, scal_coll
 from pyfr.quadrules.surface import SurfaceIntegrator
 from pyfr.solvers.baseadvec import (BaseAdvectionIntInters,
                                     BaseAdvectionMPIInters,
-                                    BaseAdvectionBCInters)
+                                    BaseAdvectionBCInters,
+                                    BaseAdvectionSlidingInters)
 from pyfr.writers.csv import CSVStream
-
-import numpy as np
 
 
 class FluidIntIntersMixin:
@@ -245,3 +246,35 @@ class MassFlowBCMixin:
 
 class EulerCharRiemInvMassFlowBCInters(MassFlowBCMixin, EulerBaseBCInters):
     type = 'char-riem-inv-mass-flow'
+class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self._be.pointwise.register('pyfr.solvers.euler.kernels.bccflux')
+
+        self._tplargs |= dict(bctype=self.type, ninters=self.ninters)
+
+        self.kernels['comm_flux'] = lambda: self._be.kernel(
+            'bccflux', tplargs=self._tplargs, dims=[self.ninterfpts],
+            extrns=self._external_args, ul=self._scal_lhs, nl=self._pnorm_lhs,
+            **self._external_vals
+        )
+
+        if self._ef_enabled:
+            self._be.pointwise.register('pyfr.solvers.euler.kernels.bccent')
+
+            self.kernels['comm_entropy'] = lambda: self._be.kernel(
+                'bccent', tplargs=self._tplargs, dims=[self.ninterfpts],
+                extrns=self._external_args, entmin_lhs=self._entmin_lhs,
+                nl=self._pnorm_lhs, ul=self._scal_lhs, **self._external_vals
+            )
+
+class EulerCharRiemInvSlidingInters(EulerBaseSlidingInters):
+    type = 'char-riem-inv'
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
+
+        self.c |= self._exp_opts(
+            ['rho', 'p', 'u', 'v', 'w'][:self.ndims + 2], lhs
+        )

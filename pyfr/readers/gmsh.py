@@ -264,9 +264,11 @@ class GmshReader(BaseReader):
         #  - fluid elements ('the mesh')
         #  - boundary faces
         #  - periodic faces
+        #  - sliding faces
         self._felespent = None
         self._bfacespents = {}
         self._pfacespents = defaultdict(list)
+        self._sfacespents = {}
 
         # Seen physical names and IDs
         seen_names = set()
@@ -298,6 +300,12 @@ class GmshReader(BaseReader):
                     raise ValueError('Invalid periodic boundary condition')
 
                 self._pfacespents[p[1]].append(pent)
+            # Sliding interface faces
+            elif name.startswith('sliding'):
+                s = re.match(r'sliding[ _-]([a-z0-9]+)$', name)
+                if not s:
+                    raise ValueError('Invalid sliding interface')
+                self._sfacespents[s[1]] = pent
             # Other boundary faces
             else:
                 self._bfacespents[name] = pent
@@ -439,7 +447,7 @@ class GmshReader(BaseReader):
     def _to_raw_mesh(self, lintol):
         # Assemble a nodal mesh
         maps = self._etype_map, self._petype_fnmap, self._nodemaps
-        pents = self._felespent, self._bfacespents, self._pfacespents
+        pents = self._felespent, self._bfacespents, self._pfacespents, self._sfacespents
         mesh = NodalMeshAssembler(self._nodepts, self._elenodes, pents, maps)
 
         return mesh.get_eles(lintol, self.progress)

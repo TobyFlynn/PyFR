@@ -126,8 +126,9 @@ class NodalMeshAssembler:
     def __init__(self, nodepts, elenodes, pents, maps):
         self._nodepts = nodepts
         self._elenodes = elenodes
-        self._felespent, self._bfacespents, self._pfacespents = pents
+        self._felespent, self._bfacespents, self._pfacespents, self._sfacespents = pents
         self._etype_map, self._petype_fnmap, self._nodemaps = maps
+        self._sresid = defaultdict(list)
 
     def _check_pyr_parallelogram(self, foeles):
         # Find PyFR node map for the quad face
@@ -167,7 +168,7 @@ class NodalMeshAssembler:
 
         return selemap.pop(self._felespent), selemap
 
-    def _foface_info(self, petype, pftype, codec, foeles):
+    def _foface_info(self, petype, pftype, codec, foeles, bpart):
         # Face numbers of faces of this type on this element
         fnums = np.array(self._petype_fnums[petype][pftype])
 
@@ -191,6 +192,14 @@ class NodalMeshAssembler:
         # Generate the associated connectivity information
         eidx, fidx = divmod(nodeix, nfaces)
 
+        # Handle faces in sliding interfaces
+        if len(self._sfacespents) > 0:
+            sliding_faces = np.concatenate([bpart[self._sfacespents[sf]][etype] for sf in self._sfacespents for etype in bpart[self._sfacespents[sf]]])
+            sliding_faces = [tuple(sorted(sf)) for sf in sliding_faces]
+            for _nodes, _eidx, _fidx in zip(nodes, eidx, fidx):
+                if tuple(_nodes) in sliding_faces:
+                    self._sresid[tuple(_nodes)].append([cidx[_fidx], _eidx])
+
         return petype, (cidx[fidx], fnums[fidx], eidx), nodes
 
     def _codec_conn(self, eles, codec):
@@ -201,21 +210,26 @@ class NodalMeshAssembler:
 
         return cconn
 
-    def _extract_faces(self, foeles, codec):
+    def _extract_faces(self, foeles, codec, bpart):
         fofaces = defaultdict(list)
 
         for petype, eles in foeles.items():
             for pftype in self._petype_fnums[petype]:
-                fofinf = self._foface_info(petype, pftype, codec, eles)
+                fofinf = self._foface_info(petype, pftype, codec, eles, bpart)
                 fofaces[pftype].append(fofinf)
 
         return fofaces
 
-    def _pair_fluid_faces(self, ffofaces, codec, eles):
+    def _pair_fluid_faces(self, ffofaces, codec, eles, bpart):
         # Map from codec numbers to per-element face connectivity arrays
         cconn = self._codec_conn(eles, codec)
 
         resid = {}
+
+        sliding_faces = []
+        if len(self._sfacespents) > 0:
+            sliding_faces = np.concatenate([bpart[self._sfacespents[sf]][etype] for sf in self._sfacespents for etype in bpart[self._sfacespents[sf]]])
+            sliding_faces = [tuple(sorted(sf)) for sf in sliding_faces]
 
         for pftype, faces in ffofaces.items():
             for petype, (cidx, fidx, eidx), nodes in faces:
@@ -243,6 +257,9 @@ class NodalMeshAssembler:
                 con = np.column_stack([cidx[mask], eidx[mask]])
                 con = con.view([('', cidx.dtype)]*2).squeeze()
                 for rf, n in zip(iter_struct(con), iter_struct(nodes[mask])):
+                    # Check if nodes belong to a sliding interface
+                    if tuple(n) in sliding_faces:
+                        self._sresid[n].append(rf)
                     # If the nodes are in resid then pair the faces
                     if (lf := resid.pop(n, None)):
                         lcidx, loff = lf
@@ -301,6 +318,15 @@ class NodalMeshAssembler:
 
                     cconn[lcidx][loff] = cidx, -1
 
+    def _ident_sliding_faces(self, bpart, cconn, codec, foeles):
+        for sidx in self._sfacespents:
+            cidx = codec.index(f'sliding/{sidx}')
+            
+            for fn in chain.from_iterable(bpart[self._sfacespents[sidx]].values()):
+                tmp = self._sresid.pop(tuple(sorted(fn)))
+                for lcidx, loff in tmp:
+                    cconn[lcidx][loff] = cidx, -2
+
     def get_eles(self, lintol, progress=NullProgressSequence()):
         eles, codec = {}, []
 
@@ -337,6 +363,9 @@ class NodalMeshAssembler:
         # Add the boundary conditions to the codec
         codec.extend(f'bc/{bname}' for bname in self._bfacespents)
 
+        # Add sliding interfaces to the codec
+        codec.extend(f'sliding/{num}' for num in self._sfacespents)
+
         # Add in connectivity information
         with progress.start_with_spinner('Connecting elements') as spinner:
             pmap = self._connect_eles(eles, codec, spinner)
@@ -357,11 +386,11 @@ class NodalMeshAssembler:
         spinner()
 
         # Extract the faces of the first-order fluid elements
-        ffofaces = self._extract_faces(fpart, codec)
+        ffofaces = self._extract_faces(fpart, codec, bpart)
         spinner()
 
         # Pair the fluid-fluid faces
-        resid, cconn = self._pair_fluid_faces(ffofaces, codec, eles)
+        resid, cconn = self._pair_fluid_faces(ffofaces, codec, eles, bpart)
         spinner()
 
         # Tag and pair periodic boundary faces
@@ -370,6 +399,10 @@ class NodalMeshAssembler:
 
         # Identify the fixed boundary faces
         self._ident_boundary_faces(bpart, cconn, codec, resid)
+        spinner()
+
+        # Identify the sliding interfaces
+        self._ident_sliding_faces(bpart, cconn, codec, foeles)
         spinner()
 
         if any(resid.values()):

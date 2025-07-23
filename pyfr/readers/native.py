@@ -33,6 +33,7 @@ class _Mesh:
     con: list = field(default_factory=list)
     con_p: dict = field(default_factory=dict)
     bcon: dict = field(default_factory=dict)
+    scon: dict = field(default_factory=dict)
 
 
 class NativeReader:
@@ -146,7 +147,7 @@ class NativeReader:
 
         return replace(self.mesh, subset=True, eidxs=eidxs, spts=spts,
                        spts_nodes=spts_nodes, spts_curved=spts_curved,
-                       con=None, con_p=None, bcon=None)
+                       con=None, con_p=None, bcon=None, scon=None)
 
     def _read_metadata(self):
         mesh = self.mesh
@@ -288,6 +289,7 @@ class NativeReader:
 
         conl, conr = [], []
         bcon = {i: [] for i, c in enumerate(codec) if c.startswith('bc/')}
+        scon = {i: [] for i, c in enumerate(codec) if c.startswith('sliding/')}
         resid = {}
 
         for etype, einfo in self.eles.items():
@@ -299,6 +301,9 @@ class NativeReader:
                     # Boundary
                     if off == -1:
                         bcon[cidx].append((etype, j, fidx))
+                    # Sliding interface
+                    elif off == -2:
+                        scon[cidx].append((etype, j, fidx))
                     # Unpaired face
                     elif j not in cdone[efcidx]:
                         # Lookup the element type and face number
@@ -319,6 +324,10 @@ class NativeReader:
         for k, v in bcon.items():
             if v:
                 self.mesh.bcon[codec[k][3:]] = v
+        
+        for k, v in scon.items():
+            if v:
+                self.mesh.scon[codec[k][8:]] = v
 
         # Handle inter-partition connectivity
         if resid:

@@ -17,6 +17,7 @@ class BaseSystem:
     intinterscls = None
     mpiinterscls = None
     bbcinterscls = None
+    bslidinginterscls = None
 
     # Nonce sequence
     _nonce_seq = it.count()
@@ -70,12 +71,13 @@ class BaseSystem:
         self._int_inters = self._load_int_inters(mesh, elemap)
         self._mpi_inters = self._load_mpi_inters(mesh, elemap)
         self._bc_inters, self._bc_prefns = self._load_bc_inters(mesh, elemap)
+        self._sliding_inters = self._load_sliding_inters(mesh, elemap)
         backend.commit()
 
     def commit(self):
         # Prepare the kernels and any associated MPI requests
         self._gen_kernels(self.nregs, self.ele_map.values(), self._int_inters,
-                          self._mpi_inters, self._bc_inters)
+                          self._mpi_inters, self._bc_inters, self._sliding_inters)
         self._gen_mpireqs(self._mpi_inters)
         self.backend.commit()
 
@@ -183,8 +185,25 @@ class BaseSystem:
                 bc_prefns[bname] = pfn
 
         return bc_inters, bc_prefns
+    
+    def _load_sliding_inters(self, mesh, elemap):
+        sicls = self.bslidinginterscls
+        simap = {b.type: b for b in subclasses(sicls, just_leaf=True)}
 
-    def _gen_kernels(self, nregs, eles, iint, mpiint, bcint):
+        si_inters = []
+        for bname, interarr in mesh.scon.items():
+            # Determine the config file section
+            cfgsect = f'soln-sliding-interface-{bname}'
+
+            # Instantiate
+            siclass = simap[self.cfg.get(cfgsect, 'type')]
+            siface = siclass(self.backend, interarr, elemap, cfgsect,
+                             self.cfg)
+            si_inters.append(siface)
+
+        return si_inters
+
+    def _gen_kernels(self, nregs, eles, iint, mpiint, bcint, siint):
         self._kernels = kernels = defaultdict(list)
 
         # Helper function to tag the element type/MPI interface
@@ -198,9 +217,11 @@ class BaseSystem:
                 self._ktags[kern] = f'mpiint/{prov.name}'
             elif pname == 'bcint':
                 self._ktags[kern] = f'bcint/{prov.name}'
+            elif pname == 'siint':
+                self._ktags[kern] = f'siint/{prov.name}'
 
-        provnames = ['eles', 'iint', 'mpiint', 'bcint']
-        provlists = [eles, iint, mpiint, bcint]
+        provnames = ['eles', 'iint', 'mpiint', 'bcint', 'siint']
+        provlists = [eles, iint, mpiint, bcint, siint]
 
         for pn, provs in zip(provnames, provlists):
             for p in provs:

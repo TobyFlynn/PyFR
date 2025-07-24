@@ -253,6 +253,9 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
         self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxlhs')
         self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxrhs')
         self._be.pointwise.register('pyfr.solvers.euler.kernels.sicopy')
+        self._be.pointwise.register('pyfr.solvers.euler.kernels.siinterp')
+
+        self._tplargs |= dict(nftps=len(self.fpts), ninterfpts=self.ninterfpts)
 
         self.kernels['copy_fpts_lhs'] = lambda: self._be.kernel(
             'sicopy', tplargs=self._tplargs, dims=[self.ninterfpts], 
@@ -263,14 +266,26 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
             src=self._scal_rhs, dst=self._scal_rhs_copy
         )
 
+        self.kernels['interp_fpts_lhs'] = lambda: self._be.kernel(
+            'siinterp', tplargs=self._tplargs, dims=[self.ninterfpts], 
+            src=self._scal_rhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats, 
+            dst=self._scal_lhs_interp
+        )
+
+        self.kernels['interp_fpts_rhs'] = lambda: self._be.kernel(
+            'siinterp', tplargs=self._tplargs, dims=[self.ninterfpts], 
+            src=self._scal_lhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats, 
+            dst=self._scal_rhs_interp
+        )
+
         self.kernels['comm_flux_lhs'] = lambda: self._be.kernel(
             'siintcfluxlhs', tplargs=self._tplargs, dims=[self.ninterfpts],
-            ul=self._scal_lhs, ur=self._scal_rhs_copy, nl=self._pnorm_lhs
+            ul=self._scal_lhs, ur=self._scal_lhs_interp, nl=self._pnorm_lhs
         )
 
         self.kernels['comm_flux_rhs'] = lambda: self._be.kernel(
             'siintcfluxrhs', tplargs=self._tplargs, dims=[self.ninterfpts],
-            ul=self._scal_lhs_copy, ur=self._scal_rhs, nr=self._pnorm_rhs
+            ul=self._scal_rhs_interp, ur=self._scal_rhs, nr=self._pnorm_rhs
         )
 
         if self._ef_enabled:

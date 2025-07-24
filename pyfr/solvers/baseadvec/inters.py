@@ -1,8 +1,13 @@
 import itertools as it
+from functools import cached_property
 import math
+import numpy as np
 
 from pyfr.nputil import npeval
+from pyfr.polys import get_polybasis
+from pyfr.shapes import BaseShape
 from pyfr.solvers.base import BaseInters
+from pyfr.solvers.base.inters import _get_inter_objs
 
 
 class BaseAdvectionIntersMixin:
@@ -174,7 +179,11 @@ class BaseAdvectionBCInters(BaseAdvectionIntersMixin, BaseInters):
 
         return exprs
 
-
+# Current assumptions:
+# - 2D
+# - Single rank
+# - The interface is parallel to the y-axis (i.e. sign of the normal's x-component can split interface, also for pt to face mapping)
+# - Linear interface
 class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     type = None
 
@@ -183,57 +192,132 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         self.cfgsect = cfgsect
         self.name = cfgsect.removeprefix('soln-sliding-interface-')
+        self.order = cfg.getint('solver', 'order')
 
-        # For BC interfaces, which only have an LHS state, we take the
-        # permutation which results in an optimal memory access pattern
-        # iterating over this state.
-        self._perm = self._get_perm_for_view(lhs, 'get_scal_fpts_for_inter')
+        # Split into lhs and rhs of the sliding interface
+        lhs, rhs = self._split_lhs_rhs(elemap, lhs)
 
-        # LHS view and constant matrices
+        self._set_original_fpts_ploc(lhs, rhs)
+
+        # View and constant matrices
         self._scal_lhs = self._scal_view(lhs, 'get_scal_fpts_for_inter')
+        self._scal_rhs = self._scal_view(rhs, 'get_scal_fpts_for_inter')
         self._pnorm_lhs = self._const_mat(lhs, 'get_pnorms_for_inter')
+        self._pnorm_rhs = self._const_mat(rhs, 'get_pnorms_for_inter')
+
+        # Copies of face point data
+        tags = {'align'}
+        mat_size = (self.nfptstotal, self.nvars)
+        zero_init = np.full(mat_size, 0.0)
+        self._scal_lhs_copy = self._be.matrix(mat_size,
+                                              tags=tags, extent=f'sliding_lhs_copy_{self.name}',
+                                              initval=zero_init)
+        self._scal_rhs_copy = self._be.matrix(mat_size,
+                                              tags=tags, extent=f'sliding_rhs_copy_{self.name}',
+                                              initval=zero_init)
 
         # Make the simulation time available inside kernels
         self._set_external('t', 'scalar fpdtype_t')
 
         if self._ef_enabled:
             self._entmin_lhs = self._view(lhs, 'get_entmin_bc_fpts_for_inter')
+            self._entmin_rhs = self._view(rhs, 'get_entmin_bc_fpts_for_inter')
         else:
             self._entmin_lhs = None
+            self._entmin_rhs = None
+        
+        # Set to correct values, parent sets these before split
+        self.ninters = len(lhs)
+        self.ninterfpts = sum(elemap[etype].nfacefpts[fidx]
+                              for etype, eidx, fidx in lhs)
+        
+        # Set functions for straight line interface
+        self._get_face_bounds = self._get_line_face_bounds
+        self._check_pt_in_face = self._check_pt_in_line_face
+        self.etype = lhs[0][0]
+        self.fpts = elemap[self.etype].basis.fpts
+    
+    def _split_lhs_rhs(self, elemap, allf):
+        # Get the normal of each face
+        norm = _get_inter_objs(allf, 'get_pnorms_for_inter', self.elemap)
+        norm = np.concatenate(norm)
+        norm = np.atleast_2d(norm.T)
 
-    def _eval_opts(self, opts, default=None):
-        # Boundary conditions, much like initial conditions, can be
-        # parameterized by values in [constants] so we must bring these
-        # into scope when evaluating the boundary conditions
-        cc = self.cfg.items_as('constants', float)
-
-        cfg, sect = self.cfg, self.cfgsect
-
-        # Evaluate any BC specific arguments from the config file
-        if default is not None:
-            return [npeval(cfg.getexpr(sect, k, default), cc) for k in opts]
-        else:
-            return [npeval(cfg.getexpr(sect, k), cc) for k in opts]
-
-    def _exp_opts(self, opts, lhs, default={}):
-        cfg, sect = self.cfg, self.cfgsect
-
-        subs = cfg.items('constants')
-        subs |= dict(x='ploc[0]', y='ploc[1]', z='ploc[2]')
-        subs |= dict(abs='fabs', pi=str(math.pi))
-
-        exprs = {}
-        for k in opts:
-            if k in default:
-                exprs[k] = cfg.getexpr(sect, k, default[k], subs=subs)
+        # Currently split on the x component of the normal
+        lhs = []
+        rhs = []
+        self.nfptstotal = 0
+        for i in range(0, len(allf)):
+            if norm[0][self.nfptstotal] < 0.0:
+                lhs.append(allf[i])
             else:
-                exprs[k] = cfg.getexpr(sect, k, subs=subs)
+                rhs.append(allf[i])
+            etype, eidx, fidx = allf[i]
+            self.nfptstotal += elemap[etype].nfacefpts[fidx]
+        
+        return lhs, rhs
 
-        if (any('ploc' in ex for ex in exprs.values()) and
-            'ploc' not in self._external_args):
-            spec = f'in fpdtype_t[{self.ndims}]'
-            value = self._const_mat(lhs, 'get_ploc_for_inter')
+    @cached_property
+    def _face_polybasis(self):
+        return get_polybasis('line', self.order + 1, self.fpts)
 
-            self._set_external('ploc', spec, value=value)
+    def _set_original_fpts_ploc(self, lhs, rhs):
+        self._lhs_plocs = _get_inter_objs(lhs, 'get_plocs_for_inter', self.elemap)
+        self._rhs_plocs = _get_inter_objs(rhs, 'get_plocs_for_inter', self.elemap)
 
-        return exprs
+    def _apply_transform_to_ploc(self):
+        return self._lhs_plocs, self._rhs_plocs
+    
+    def _get_line_face_bounds(self, plocs):
+        ybounds = []
+        for _plocs in plocs:
+            miny = _plocs[0][1]
+            maxy = _plocs[0][1]
+            for i in range(1, len(_plocs)):
+                miny = min(miny, _plocs[i][1])
+                maxy = max(maxy, _plocs[i][1])
+            ybounds.append((miny, maxy))
+        return ybounds
+    
+    def _check_pt_in_line_face(self, pt, fbounds):
+        return pt[1] >= fbounds[0] and pt[1] <= fbounds[1]
+
+    # Brute force search for now
+    def _get_fidx_for_pts(self, pts_plocs, faces_plocs):
+        face_bounds = self._get_face_bounds(faces_plocs)
+        fidx = []
+        for _ploc in pts_plocs:
+            _fidx = -1
+            for i in range(0, len(face_bounds)):
+                if self._check_pt_in_face(_ploc, face_bounds[i]):
+                    _fidx = i
+                    break
+            if _fidx == -1:
+                raise Exception('A sliding interface point is not within any faces')
+            fidx.append(_fidx)
+
+    # Assume y axis aligned line
+    def _get_rloc(self, pt_ploc, face_plocs):
+        return 2.0 * ((pt_ploc[1] - face_plocs[0][1]) / (face_plocs[-1][1] - face_plocs[0][1])) - 1.0
+
+    def _get_interp_mats_for_pts(self, pts_ploc, faces_plocs, fidxs):
+        mats = []
+        for _pt_ploc, _fidx in zip(pts_ploc, fidxs):
+            face_plocs = faces_plocs[_fidx]
+            rloc = self._get_rloc(_pt_ploc, face_plocs)
+            mats.append(self._face_polybasis.nodal_basis_at(rloc))
+        return mats
+
+    def interpolate(self, system, ubank, t):
+        # Get the current plocs of each face point
+        lhs_plocs, rhs_plocs = self._apply_transform_to_ploc()
+
+        # Work out which face contains each face point
+        lhs_pts_rhs_fidx = self._get_fidx_for_pts(lhs_plocs, rhs_plocs)
+        rhs_pts_lhs_fidx = self._get_fidx_for_pts(rhs_plocs, lhs_plocs)
+
+        # Calculate matrix to interpolate to face point
+        lhs_pts_interp_matrices = self._get_interp_mats_for_pts(lhs_plocs, rhs_plocs, lhs_pts_rhs_fidx)
+        rhs_pts_interp_matrices = self._get_interp_mats_for_pts(rhs_plocs, lhs_plocs, rhs_pts_lhs_fidx)
+
+        # TODO work out how to get this info to a kernel that can use them

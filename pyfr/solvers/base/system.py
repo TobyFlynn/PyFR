@@ -300,6 +300,9 @@ class BaseSystem:
 
         for b, bfn in self._bc_prefns.items():
             bfn(self, uinbank, t, bckerns[b])
+        
+        for b in self._sliding_inters:
+            b.interpolate(self, uinbank, t)
 
         for b in binders:
             b(t=t)

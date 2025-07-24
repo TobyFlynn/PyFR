@@ -417,6 +417,10 @@ class BaseElements:
     def get_pnorms_for_inter(self, eidx, fidx):
         fpts_idx = self._srtd_face_fpts[fidx][eidx]
         return self._pnorm_fpts[fpts_idx, eidx]
+    
+    def get_plocs_for_inter(self, eidx, fidx):
+        fpts_idx = self._srtd_face_fpts[fidx][eidx]
+        return self.plocfpts[fpts_idx, eidx]
 
     @inters_map
     def get_scal_fpts_for_inter(self, eidx, fidx):

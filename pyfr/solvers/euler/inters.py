@@ -250,31 +250,44 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._be.pointwise.register('pyfr.solvers.euler.kernels.bccflux')
+        self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxlhs')
+        self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxrhs')
+        self._be.pointwise.register('pyfr.solvers.euler.kernels.sicopy')
 
-        self._tplargs |= dict(bctype=self.type, ninters=self.ninters)
+        self.kernels['copy_fpts_lhs'] = lambda: self._be.kernel(
+            'sicopy', tplargs=self._tplargs, dims=[self.ninterfpts], 
+            src=self._scal_lhs, dst=self._scal_lhs_copy
+        )
+        self.kernels['copy_fpts_rhs'] = lambda: self._be.kernel(
+            'sicopy', tplargs=self._tplargs, dims=[self.ninterfpts], 
+            src=self._scal_rhs, dst=self._scal_rhs_copy
+        )
 
-        self.kernels['comm_flux'] = lambda: self._be.kernel(
-            'bccflux', tplargs=self._tplargs, dims=[self.ninterfpts],
-            extrns=self._external_args, ul=self._scal_lhs, nl=self._pnorm_lhs,
-            **self._external_vals
+        self.kernels['comm_flux_lhs'] = lambda: self._be.kernel(
+            'siintcfluxlhs', tplargs=self._tplargs, dims=[self.ninterfpts],
+            ul=self._scal_lhs, ur=self._scal_rhs_copy, nl=self._pnorm_lhs
+        )
+
+        self.kernels['comm_flux_rhs'] = lambda: self._be.kernel(
+            'siintcfluxrhs', tplargs=self._tplargs, dims=[self.ninterfpts],
+            ul=self._scal_lhs_copy, ur=self._scal_rhs, nr=self._pnorm_rhs
         )
 
         if self._ef_enabled:
-            self._be.pointwise.register('pyfr.solvers.euler.kernels.bccent')
+            self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcent')
 
-            self.kernels['comm_entropy'] = lambda: self._be.kernel(
-                'bccent', tplargs=self._tplargs, dims=[self.ninterfpts],
-                extrns=self._external_args, entmin_lhs=self._entmin_lhs,
-                nl=self._pnorm_lhs, ul=self._scal_lhs, **self._external_vals
+            self.kernels['comm_entropy_lhs'] = lambda: self._be.kernel(
+                'siintcent', tplargs={}, dims=[self.ninters],
+                entmin_lhs=self._entmin_lhs, entmin_rhs=self._entmin_rhs
             )
 
-class EulerCharRiemInvSlidingInters(EulerBaseSlidingInters):
-    type = 'char-riem-inv'
+            self.kernels['comm_entropy_rhs'] = lambda: self._be.kernel(
+                'siintcent', tplargs={}, dims=[self.ninters],
+                entmin_lhs=self._entmin_rhs, entmin_rhs=self._entmin_lhs
+            )
+
+class EulerTranslationSlidingInters(EulerBaseSlidingInters):
+    type = 'translation'
 
     def __init__(self, be, lhs, elemap, cfgsect, cfg):
         super().__init__(be, lhs, elemap, cfgsect, cfg)
-
-        self.c |= self._exp_opts(
-            ['rho', 'p', 'u', 'v', 'w'][:self.ndims + 2], lhs
-        )

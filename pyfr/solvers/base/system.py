@@ -302,7 +302,7 @@ class BaseSystem:
             bfn(self, uinbank, t, bckerns[b])
         
         for b in self._sliding_inters:
-            b.interpolate(self, uinbank, t)
+            b.interpolate(t)
 
         for b in binders:
             b(t=t)

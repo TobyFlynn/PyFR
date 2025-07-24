@@ -341,7 +341,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
             mats.append(self._face_polybasis.nodal_basis_at([rloc]))
         return mats
 
-    def interpolate(self, system, ubank, t):
+    def interpolate(self, t):
         # Get the current plocs of each face point
         lhs_plocs, rhs_plocs = self._apply_transform_to_ploc()
         lhs_face_bounds, rhs_face_bounds = self._apply_transform_to_face_bounds()

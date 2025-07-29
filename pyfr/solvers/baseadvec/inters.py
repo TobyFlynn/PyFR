@@ -195,6 +195,12 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.name = cfgsect.removeprefix('soln-sliding-interface-')
         self.order = cfg.getint('solver', 'order')
 
+        # Get translation
+        self.ul = cfg.getfloat(cfgsect, 'ul')
+        self.vl = cfg.getfloat(cfgsect, 'vl')
+        self.ur = cfg.getfloat(cfgsect, 'ur')
+        self.vr = cfg.getfloat(cfgsect, 'vr')
+
         # Set functions for straight line interface
         self._check_pt_in_face = self._check_pt_in_line_face
         self.etype = lhs[0][0]
@@ -209,8 +215,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.ninterfpts = sum(elemap[etype].nfacefpts[fidx]
                               for etype, eidx, fidx in lhs)
 
-        self._set_original_fpts_ploc(lhs, rhs)
-        self._set_original_face_bounds(lhs, rhs)
+        self._set_original_fpts_and_bounds(lhs, rhs)
 
         # View and constant matrices
         self._scal_lhs = self._scal_view(lhs, 'get_scal_fpts_for_inter')
@@ -287,11 +292,10 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     def _face_polybasis(self):
         return get_polybasis('line', self.order + 1, self.fpts)
 
-    def _set_original_fpts_ploc(self, lhs, rhs):
+    def _set_original_fpts_and_bounds(self, lhs, rhs):
         self._lhs_plocs = _get_inter_objs(lhs, 'get_plocs_for_inter', self.elemap)
         self._rhs_plocs = _get_inter_objs(rhs, 'get_plocs_for_inter', self.elemap)
 
-    def _set_original_face_bounds(self, lhs, rhs):
         op = self._face_polybasis.nodal_basis_at([-1.0, 1.0])
 
         self._lhs_face_bounds = []
@@ -303,12 +307,29 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         for _plocs in self._rhs_plocs:
             _y = [_pt[1] for _pt in _plocs]
             self._rhs_face_bounds.append(op @ _y)
+        
+        self._lhs_plocs = np.reshape(self._lhs_plocs, (-1, 2))
+        self._rhs_plocs = np.reshape(self._rhs_plocs, (-1, 2))
 
-    def _apply_transform_to_ploc(self):
-        return self._lhs_plocs, self._rhs_plocs
+    def _apply_transform(self, t):
+        # Apply the transform to each side of the equation
+        t_ploc_lhs = np.array([[_u + self.ul * t, _v + self.vl * t] for _u, _v in self._lhs_plocs])
+        t_ploc_rhs = np.array([[_u + self.ur * t, _v + self.vr * t] for _u, _v in self._rhs_plocs])
+        t_bounds_lhs = np.array([[_u + self.ul * t, _v + self.vl * t] for _u, _v in self._lhs_face_bounds])
+        t_bounds_rhs = np.array([[_u + self.ur * t, _v + self.vr * t] for _u, _v in self._rhs_face_bounds])
+
+        # Mod each ploc point to match the otherside's face bounds
+        pass
+
+    def _apply_transform_to_ploc(self, t):
+        t_ploc_lhs = np.array([[_u + self.ul * t, _v + self.vl * t] for _u, _v in self._lhs_plocs])
+        t_ploc_rhs = np.array([[_u + self.ur * t, _v + self.vr * t] for _u, _v in self._rhs_plocs])
+        return trans_lhs, trans_rhs
     
-    def _apply_transform_to_face_bounds(self):
-        return self._lhs_face_bounds, self._rhs_face_bounds
+    def _apply_transform_to_face_bounds(self, t):
+        trans_lhs = np.array([[_u + self.ul * t, _v + self.vl * t] for _u, _v in self._lhs_face_bounds])
+        trans_rhs = np.array([[_u + self.ur * t, _v + self.vr * t] for _u, _v in self._rhs_face_bounds])
+        return trans_lhs, trans_rhs
     
     def _check_pt_in_line_face(self, pt, fbounds):
         return pt[1] >= fbounds[0] and pt[1] <= fbounds[1]
@@ -316,8 +337,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     # Brute force search for now
     def _get_fidx_for_pts(self, pts_plocs, face_bounds):
         fidx = []
-        _pts_plocs = np.reshape(pts_plocs, (-1, 2))
-        for _ploc in _pts_plocs:
+        for _ploc in pts_plocs:
             _fidx = -1
             for i in range(0, len(face_bounds)):
                 if self._check_pt_in_face(_ploc, face_bounds[i]):
@@ -334,8 +354,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     def _get_interp_mats_for_pts(self, pts_ploc, faces_bounds, fidxs):
         mats = []
-        _pts_ploc = np.reshape(pts_ploc, (-1, 2))
-        for _pt_ploc, _fidx in zip(_pts_ploc, fidxs):
+        for _pt_ploc, _fidx in zip(pts_ploc, fidxs):
             face_bounds = faces_bounds[_fidx]
             rloc = self._get_rloc(_pt_ploc, face_bounds)
             mats.append(self._face_polybasis.nodal_basis_at([rloc]))
@@ -343,8 +362,8 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     def interpolate(self, t):
         # Get the current plocs of each face point
-        lhs_plocs, rhs_plocs = self._apply_transform_to_ploc()
-        lhs_face_bounds, rhs_face_bounds = self._apply_transform_to_face_bounds()
+        lhs_plocs, rhs_plocs = self._apply_transform_to_ploc(t)
+        lhs_face_bounds, rhs_face_bounds = self._apply_transform_to_face_bounds(t)
 
         # Work out which face contains each face point
         lhs_pts_rhs_fidx = self._get_fidx_for_pts(lhs_plocs, rhs_face_bounds)

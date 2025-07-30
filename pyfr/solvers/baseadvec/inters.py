@@ -267,6 +267,20 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._rhs_interp_mats = self._be.matrix(mat_size_interp, tags=tags, 
                                          extent=f'sliding_rhs_interp_mats_{self.name}',
                                          initval=zero_init)
+        
+        # Kernels common across all solver
+        self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.sicopy')
+
+        tplargs = dict(nvars=self.nvars)
+
+        self.kernels['copy_fpts_lhs'] = lambda: self._be.kernel(
+            'sicopy', tplargs=tplargs, dims=[self.ninterfpts], 
+            src=self._scal_lhs, dst=self._scal_lhs_copy
+        )
+        self.kernels['copy_fpts_rhs'] = lambda: self._be.kernel(
+            'sicopy', tplargs=tplargs, dims=[self.ninterfpts], 
+            src=self._scal_rhs, dst=self._scal_rhs_copy
+        )
     
     def _split_lhs_rhs(self, elemap, allf):
         # Get the normal of each face

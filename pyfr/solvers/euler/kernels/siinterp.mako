@@ -16,20 +16,23 @@
     dst[${var}] = acc;
 % endfor
 
+    // Account for changing the frame of reference
 % if lhs:
     // Rho is constant
-    // U is constant as we restrict to only moving in y dimension
-    // V is moving at 0.1
-    dst[2] = (dst[2] / dst[0] - 0.1) * dst[0];
-    // Change E to account for this
-    dst[3] -= 0.5 * dst[0] * 0.1 * 0.1;
+    // Rhou
+    dst[1] = (dst[1] / dst[0] + ${vel_r[0] - vel_l[0]}) * dst[0];
+    // Rhov
+    dst[2] = (dst[2] / dst[0] + ${vel_r[1] - vel_l[1]}) * dst[0];
+    // E
+    dst[3] += 0.5 * dst[0] * (${vel_l[0]**2} - ${vel_r[0]**2});
 % else:
     // Rho is constant
-    // U is constant as we restrict to only moving in y dimension
-    // V is moving at 0.1
-    dst[2] = (dst[2] / dst[0] + 0.1) * dst[0];
-    // Change E to account for this
-    dst[3] += 0.5 * dst[0] * 0.1 * 0.1;
+    // Rhou
+    dst[1] = (dst[1] / dst[0] + (${vel_l[0] - vel_r[0]})) * dst[0];
+    // Rhov
+    dst[2] = (dst[2] / dst[0] + (${vel_l[1] - vel_r[1]})) * dst[0];
+    // E
+    dst[3] += 0.5 * dst[0] * (${vel_r[0]**2} - ${vel_l[0]**2});
 % endif
 
 </%pyfr:kernel>

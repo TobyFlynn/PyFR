@@ -2,7 +2,8 @@ import numpy as np
 
 from pyfr.solvers.baseadvecdiff import (BaseAdvectionDiffusionBCInters,
                                         BaseAdvectionDiffusionIntInters,
-                                        BaseAdvectionDiffusionMPIInters)
+                                        BaseAdvectionDiffusionMPIInters,
+                                        BaseAdvectionDiffusionSlidingInters)
 from pyfr.solvers.euler.inters import (FluidIntIntersMixin,
                                        FluidMPIIntersMixin,
                                        MassFlowBCMixin)
@@ -216,3 +217,15 @@ class NavierStokesCharRiemInvMassFlowBCInters(MassFlowBCMixin,
                                               NavierStokesBaseBCInters):
     type = 'char-riem-inv-mass-flow'
     cflux_state = 'ghost'
+class NavierStokesBaseSlidingInters(TplargsMixin, BaseAdvectionDiffusionSlidingInters):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        pass
+
+
+class NavierStokesTranslationSlidingInters(NavierStokesBaseSlidingInters):
+    type = 'translation'
+
+    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+        super().__init__(be, lhs, elemap, cfgsect, cfg)

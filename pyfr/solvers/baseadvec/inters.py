@@ -208,20 +208,20 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.fpts = get_quadrule('line', linepts, qdeg=self.order+2).pts
 
         # Split into lhs and rhs of the sliding interface
-        lhs, rhs = self._split_lhs_rhs(elemap, lhs)
+        self.lhs, self.rhs = self._split_lhs_rhs(elemap, lhs)
 
         # Set to correct values, parent sets these before split
-        self.ninters = len(lhs)
+        self.ninters = len(self.lhs)
         self.ninterfpts = sum(elemap[etype].nfacefpts[fidx]
-                              for etype, eidx, fidx in lhs)
+                              for etype, eidx, fidx in self.lhs)
 
-        self._set_original_fpts_and_bounds(lhs, rhs)
+        self._set_original_fpts_and_bounds(self.lhs, self.rhs)
 
         # View and constant matrices
-        self._scal_lhs = self._scal_view(lhs, 'get_scal_fpts_for_inter')
-        self._scal_rhs = self._scal_view(rhs, 'get_scal_fpts_for_inter')
-        self._pnorm_lhs = self._const_mat(lhs, 'get_pnorms_for_inter')
-        self._pnorm_rhs = self._const_mat(rhs, 'get_pnorms_for_inter')
+        self._scal_lhs = self._scal_view(self.lhs, 'get_scal_fpts_for_inter')
+        self._scal_rhs = self._scal_view(self.rhs, 'get_scal_fpts_for_inter')
+        self._pnorm_lhs = self._const_mat(self.lhs, 'get_pnorms_for_inter')
+        self._pnorm_rhs = self._const_mat(self.rhs, 'get_pnorms_for_inter')
 
         # Copies of face point data
         tags = {'align'}
@@ -244,8 +244,8 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._set_external('t', 'scalar fpdtype_t')
 
         if self._ef_enabled:
-            self._entmin_lhs = self._view(lhs, 'get_entmin_bc_fpts_for_inter')
-            self._entmin_rhs = self._view(rhs, 'get_entmin_bc_fpts_for_inter')
+            self._entmin_lhs = self._view(self.lhs, 'get_entmin_bc_fpts_for_inter')
+            self._entmin_rhs = self._view(self.rhs, 'get_entmin_bc_fpts_for_inter')
         else:
             self._entmin_lhs = None
             self._entmin_rhs = None
@@ -270,6 +270,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         
         # Kernels common across all solver
         self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.sicopy')
+        self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.siinterp')
 
         tplargs = dict(nvars=self.nvars)
 
@@ -280,6 +281,17 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.kernels['copy_fpts_rhs'] = lambda: self._be.kernel(
             'sicopy', tplargs=tplargs, dims=[self.ninterfpts], 
             src=self._scal_rhs, dst=self._scal_rhs_copy
+        )
+
+        self.kernels['interp_fpts_lhs'] = lambda: self._be.kernel(
+            'siinterp', tplargs=self._tplargs | dict(lhs=True), dims=[self.ninterfpts],
+            src=self._scal_rhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats,
+            dst=self._scal_lhs_interp
+        )
+        self.kernels['interp_fpts_rhs'] = lambda: self._be.kernel(
+            'siinterp', tplargs=self._tplargs | dict(lhs=False), dims=[self.ninterfpts],
+            src=self._scal_lhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats,
+            dst=self._scal_rhs_interp
         )
     
     def _split_lhs_rhs(self, elemap, allf):

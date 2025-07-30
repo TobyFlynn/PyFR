@@ -1,7 +1,8 @@
 from pyfr.mpiutil import get_comm_rank_root
 from pyfr.solvers.baseadvec import (BaseAdvectionIntInters,
                                     BaseAdvectionMPIInters,
-                                    BaseAdvectionBCInters)
+                                    BaseAdvectionBCInters,
+                                    BaseAdvectionSlidingInters)
 
 
 class BaseAdvectionDiffusionIntInters(BaseAdvectionIntInters):
@@ -133,3 +134,19 @@ class BaseAdvectionDiffusionBCInters(BaseAdvectionBCInters):
             self._artvisc_lhs = self._view(lhs, 'get_artvisc_fpts_for_inter')
         else:
             self._artvisc_lhs = None
+
+class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
+    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+        super().__init__(be, lhs, elemap, cfg)
+
+        # Generate the additional view matrices
+        self._vect_lhs = self._vect_view(self.lhs, 'get_vect_fpts_for_inter')
+        self._vect_rhs = self._vect_view(self.rhs, 'get_vect_fpts_for_inter')
+        self._comm_lhs = self._scal_view(self.lhs, 'get_comm_fpts_for_inter')
+        self._comm_rhs = self._scal_view(self.rhs, 'get_comm_fpts_for_inter')
+
+        if cfg.get('solver', 'shock-capturing') == 'artificial-viscosity':
+            raise Exception(f'artificial viscosity and sliding interfaces has not been implemented')
+        
+        # Additional kernel constants
+        self.c |= cfg.items_as('solver-interfaces', float)

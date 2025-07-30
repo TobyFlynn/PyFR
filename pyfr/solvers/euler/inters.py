@@ -267,13 +267,13 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
         )
 
         self.kernels['interp_fpts_lhs'] = lambda: self._be.kernel(
-            'siinterp', tplargs=self._tplargs, dims=[self.ninterfpts], 
+            'siinterp', tplargs=self._tplargs | dict(lhs=True), dims=[self.ninterfpts], 
             src=self._scal_rhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats, 
             dst=self._scal_lhs_interp
         )
 
         self.kernels['interp_fpts_rhs'] = lambda: self._be.kernel(
-            'siinterp', tplargs=self._tplargs, dims=[self.ninterfpts], 
+            'siinterp', tplargs=self._tplargs | dict(lhs=False), dims=[self.ninterfpts], 
             src=self._scal_lhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats, 
             dst=self._scal_rhs_interp
         )

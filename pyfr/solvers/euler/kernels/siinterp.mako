@@ -15,4 +15,21 @@
     }
     dst[${var}] = acc;
 % endfor
+
+% if lhs:
+    // Rho is constant
+    // U is constant as we restrict to only moving in y dimension
+    // V is moving at 0.1
+    dst[2] = (dst[2] / dst[0] - 0.1) * dst[0];
+    // Change E to account for this
+    dst[3] -= 0.5 * dst[0] * 0.1 * 0.1;
+% else:
+    // Rho is constant
+    // U is constant as we restrict to only moving in y dimension
+    // V is moving at 0.1
+    dst[2] = (dst[2] / dst[0] + 0.1) * dst[0];
+    // Change E to account for this
+    dst[3] += 0.5 * dst[0] * 0.1 * 0.1;
+% endif
+
 </%pyfr:kernel>

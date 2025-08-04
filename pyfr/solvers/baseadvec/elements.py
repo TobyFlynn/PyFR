@@ -87,10 +87,18 @@ class BaseAdvectionElements(BaseElements):
 
         # First flux correction kernel
         if fluxaa and self.basis.order > 0:
-            kernels['tdivtpcorf'] = lambda fout: self._be.kernel(
-                'mul', self.opmat('(M1 - M3*M2)*M9'), self._vect_qpts,
-                out=self.scal_upts[fout]
-            )
+            if self.phyf:
+                kernels['tdivtpcorf'] = lambda fout: self._be.kernel(
+                    'batchmm', dims=[self.neles], 
+                    tplargs={'na': self.nupts, 'nb': self.nqpts*self.ndims, 'nvars': self.nvars, 'beta': 0.0},
+                    A=self.opmat('(M111 - M3*M222)*M9'), u=self._vect_qpts,
+                    v=self.scal_upts[fout]
+                )
+            else:
+                kernels['tdivtpcorf'] = lambda fout: self._be.kernel(
+                    'mul', self.opmat('(M1 - M3*M2)*M9'), self._vect_qpts,
+                    out=self.scal_upts[fout]
+                )
         elif self.basis.order > 0:
             if self.phyf:
                 kernels['tdivtpcorf'] = lambda fout: self._be.kernel(

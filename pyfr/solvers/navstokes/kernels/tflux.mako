@@ -14,6 +14,7 @@
               u='in fpdtype_t[${str(nvars)}]'
               artvisc='in broadcast-col fpdtype_t'
               f='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              fp='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
               gradu='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
               smats='in fpdtype_t[${str(ndims)}][${str(ndims)}]'
               rcpdjac='in fpdtype_t'
@@ -31,19 +32,19 @@
 % endif
     // Compute the flux (F = Fi + Fv)
     fpdtype_t p, v[${ndims}];
-% if phyf:
-    ${pyfr.expand('inviscid_flux', 'u', 'f', 'p', 'v')};
-    ${pyfr.expand('viscous_flux_add', 'u', gradu, 'f')};
-    ${pyfr.expand('artificial_viscosity_add', gradu, 'f', 'artvisc')};
-% else:
     fpdtype_t ftemp[${ndims}][${nvars}];
     ${pyfr.expand('inviscid_flux', 'u', 'ftemp', 'p', 'v')};
     ${pyfr.expand('viscous_flux_add', 'u', gradu, 'ftemp')};
     ${pyfr.expand('artificial_viscosity_add', gradu, 'ftemp', 'artvisc')};
+
+% if phyf:
+% for i, j in pyfr.ndrange(ndims, nvars):
+    fp[${i}][${j}] = ftemp[${i}][${j}];
+% endfor
+% endif
     // Transform the fluxes
 % for i, j in pyfr.ndrange(ndims, nvars):
     f[${i}][${j}] = ${' + '.join(f'{smats}[{i}][{k}]*ftemp[{k}][{j}]'
                                  for k in range(ndims))};
 % endfor
-% endif
 </%pyfr:kernel>

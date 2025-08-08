@@ -63,68 +63,135 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
         av = self.artvisc
 
         # Gradient + flux kernel fusion
-        if self.grad_fusion:
-            if c in r:
-                tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'curved-fused', 'phyf': self.phyf},
-                    dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
-                    artvisc=s(av, c), f=s(self._vect_upts, c),
-                    gradu=s(self._grad_upts, c),
-                    rcpdjac=self.rcpdjac_at('upts', 'curved'),
-                    smats=self.curved_smat_at('upts')
-                ))
-            if l in r:
-                tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'linear-fused', 'phyf': self.phyf},
-                    dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
-                    artvisc=s(av, l), f=s(self._vect_upts, l),
-                    gradu=s(self._grad_upts, l),
-                    verts=self.ploc_at('linspts', l), upts=self.upts
-                ))
+        if self.phyf:
+            if self.grad_fusion:
+                if c in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'curved-fused', 'phyf': self.phyf},
+                        dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
+                        artvisc=s(av, c), f=s(self._vect_upts, c), fp=s(self._vect_upts_p, c),
+                        gradu=s(self._grad_upts, c),
+                        rcpdjac=self.rcpdjac_at('upts', 'curved'),
+                        smats=self.curved_smat_at('upts')
+                    ))
+                if l in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'linear-fused', 'phyf': self.phyf},
+                        dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
+                        artvisc=s(av, l), f=s(self._vect_upts, l), fp=s(self._vect_upts_p, l),
+                        gradu=s(self._grad_upts, l),
+                        verts=self.ploc_at('linspts', l), upts=self.upts
+                    ))
 
-            def tdisf_k(uin):
-                return self._make_sliced_kernel(k(uin) for k in tdisf)
+                def tdisf_k(uin):
+                    return self._make_sliced_kernel(k(uin) for k in tdisf)
 
-            self.kernels['tdisf_fused'] = tdisf_k
-        # No gradient + flux kernel fusion, with flux-AA
-        elif 'flux' in self.antialias:
-            if c in r:
-                tdisf.append(lambda: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
-                    dims=[self.nqpts, r[c]], u=s(self._scal_qpts, c),
-                    f=s(self._vect_qpts, c), artvisc=s(av, c),
-                    smats=self.curved_smat_at('qpts')
-                ))
-            if l in r:
-                tdisf.append(lambda: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
-                    dims=[self.nqpts, r[l]], u=s(self._scal_qpts, l),
-                    f=s(self._vect_qpts, l), artvisc=s(av, l),
-                    verts=self.ploc_at('linspts', l), upts=self.qpts
-                ))
+                self.kernels['tdisf_fused'] = tdisf_k
+            # No gradient + flux kernel fusion, with flux-AA
+            elif 'flux' in self.antialias:
+                if c in r:
+                    tdisf.append(lambda: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
+                        dims=[self.nqpts, r[c]], u=s(self._scal_qpts, c),
+                        f=s(self._vect_qpts, c), fp=s(self._vect_qpts_p, c), artvisc=s(av, c),
+                        smats=self.curved_smat_at('qpts')
+                    ))
+                if l in r:
+                    tdisf.append(lambda: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
+                        dims=[self.nqpts, r[l]], u=s(self._scal_qpts, l),
+                        f=s(self._vect_qpts, l), fp=s(self._vect_qpts_p, l), artvisc=s(av, l),
+                        verts=self.ploc_at('linspts', l), upts=self.qpts
+                    ))
 
-            def tdisf_k():
-                return self._make_sliced_kernel(k() for k in tdisf)
+                def tdisf_k():
+                    return self._make_sliced_kernel(k() for k in tdisf)
 
-            self.kernels['tdisf'] = tdisf_k
-        # No gradient + flux kernel fusion, no flux-AA
+                self.kernels['tdisf'] = tdisf_k
+            # No gradient + flux kernel fusion, no flux-AA
+            else:
+                if c in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
+                        dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
+                        f=s(self._vect_upts, c), fp=s(self._vect_upts_p, c), artvisc=s(av, c),
+                        smats=self.curved_smat_at('upts')
+                    ))
+                if l in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
+                        dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
+                        f=s(self._vect_upts, l), fp=s(self._vect_upts_p, l), artvisc=s(av, l),
+                        verts=self.ploc_at('linspts', l), upts=self.upts
+                    ))
+
+                def tdisf_k(uin):
+                    return self._make_sliced_kernel(k(uin) for k in tdisf)
+
+                self.kernels['tdisf'] = tdisf_k
         else:
-            if c in r:
-                tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
-                    dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
-                    f=s(self._vect_upts, c), artvisc=s(av, c),
-                    smats=self.curved_smat_at('upts')
-                ))
-            if l in r:
-                tdisf.append(lambda uin: self._be.kernel(
-                    'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
-                    dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
-                    f=s(self._vect_upts, l), artvisc=s(av, l),
-                    verts=self.ploc_at('linspts', l), upts=self.upts
-                ))
+            if self.grad_fusion:
+                if c in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'curved-fused', 'phyf': self.phyf},
+                        dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
+                        artvisc=s(av, c), f=s(self._vect_upts, c),
+                        gradu=s(self._grad_upts, c),
+                        rcpdjac=self.rcpdjac_at('upts', 'curved'),
+                        smats=self.curved_smat_at('upts')
+                    ))
+                if l in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'linear-fused', 'phyf': self.phyf},
+                        dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
+                        artvisc=s(av, l), f=s(self._vect_upts, l),
+                        gradu=s(self._grad_upts, l),
+                        verts=self.ploc_at('linspts', l), upts=self.upts
+                    ))
 
-            def tdisf_k(uin):
-                return self._make_sliced_kernel(k(uin) for k in tdisf)
+                def tdisf_k(uin):
+                    return self._make_sliced_kernel(k(uin) for k in tdisf)
 
-            self.kernels['tdisf'] = tdisf_k
+                self.kernels['tdisf_fused'] = tdisf_k
+            # No gradient + flux kernel fusion, with flux-AA
+            elif 'flux' in self.antialias:
+                if c in r:
+                    tdisf.append(lambda: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
+                        dims=[self.nqpts, r[c]], u=s(self._scal_qpts, c),
+                        f=s(self._vect_qpts, c), artvisc=s(av, c),
+                        smats=self.curved_smat_at('qpts')
+                    ))
+                if l in r:
+                    tdisf.append(lambda: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
+                        dims=[self.nqpts, r[l]], u=s(self._scal_qpts, l),
+                        f=s(self._vect_qpts, l), artvisc=s(av, l),
+                        verts=self.ploc_at('linspts', l), upts=self.qpts
+                    ))
+
+                def tdisf_k():
+                    return self._make_sliced_kernel(k() for k in tdisf)
+
+                self.kernels['tdisf'] = tdisf_k
+            # No gradient + flux kernel fusion, no flux-AA
+            else:
+                if c in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'curved', 'phyf': self.phyf},
+                        dims=[self.nupts, r[c]], u=s(self.scal_upts[uin], c),
+                        f=s(self._vect_upts, c), artvisc=s(av, c),
+                        smats=self.curved_smat_at('upts')
+                    ))
+                if l in r:
+                    tdisf.append(lambda uin: self._be.kernel(
+                        'tflux', tplargs=tplargs | {'ktype': 'linear', 'phyf': self.phyf},
+                        dims=[self.nupts, r[l]], u=s(self.scal_upts[uin], l),
+                        f=s(self._vect_upts, l), artvisc=s(av, l),
+                        verts=self.ploc_at('linspts', l), upts=self.upts
+                    ))
+
+                def tdisf_k(uin):
+                    return self._make_sliced_kernel(k(uin) for k in tdisf)
+
+                self.kernels['tdisf'] = tdisf_k

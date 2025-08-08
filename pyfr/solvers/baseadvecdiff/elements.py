@@ -35,6 +35,30 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         # Mesh regions
         regions = self._mesh_regions
 
+        # First flux correction kernel (override which arrays to use if using physical flux)
+        if self.phyf:
+            # Allocate required vector scratch space
+            alloc = lambda ex, n: backend.matrix(n, extent=nonce + ex, tags={'align'})
+            valloc = lambda ex, n: alloc(ex, (self.ndims, n, self.nvars, self.neles))
+            if 'vect_upts' in self._scratch_bufs:
+                self._vect_upts_p = valloc('vect_upts_p', self.nupts)
+            if 'vect_qpts' in self._scratch_bufs:
+                self._vect_qpts_p = valloc('vect_qpts_p', self.nqpts)
+
+            if 'flux' in self.antialias and self.basis.order > 0:
+                kernels['tdivtpcorf'] = lambda fout: self._be.kernel(
+                    'batchmm', dims=[self.neles], 
+                    tplargs={'na': self.nupts, 'nb': self.nqpts*self.ndims, 'nvars': self.nvars, 'beta': 0.0},
+                    A=self.opmat('(M111 - M3*M222)*M9'), u=self._vect_qpts_p,
+                    v=self.scal_upts[fout]
+                )
+            elif self.basis.order > 0:
+                kernels['tdivtpcorf'] = lambda fout: self._be.kernel(
+                    'batchmm', dims=[self.neles],
+                    tplargs={'na': self.nupts, 'nb': self.nupts*self.ndims, 'nvars': self.nvars, 'beta': 0.0},
+                    A=self.opmat('M111 - M3*M222'), u=self._vect_upts_p, v=self.scal_upts[fout]
+                )
+
         if abs(self.cfg.getfloat('solver-interfaces', 'ldg-beta')) == 0.5:
             kernels['copy_fpts'] = lambda: kernel(
                 'copy', self._comm_fpts, self._scal_fpts
@@ -43,7 +67,7 @@ class BaseAdvectionDiffusionElements(BaseAdvectionElements):
         if self.basis.order > 0:
             if self.phyf:
                 kernels['tgradpcoru_upts'] = lambda uin: kernel(
-                    'batchmm', dims=[self.neles], 
+                    'batchmm', dims=[self.neles],
                     tplargs={'na': self.nupts*self.ndims, 'nb': self.nupts, 'nvars': self.nvars, 'beta': 0.0},
                     A=self.opmat('M444 - M6*M0'), u=self.scal_upts[uin],
                     v=self._grad_upts

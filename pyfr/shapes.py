@@ -100,7 +100,7 @@ class BaseShape:
     def m111(self, eles):
         m = np.rollaxis(self.ubasis.jac_nodal_basis_at(self.upts), 2)
         s = eles.smat_at_np('upts')
-        c = np.einsum('ijkl,jin->ljkn', s, m) # contract over ndims etc.
+        c = np.einsum('ijkl,jin->ljkn', s, m)
         return c.reshape(eles.neles, self.nupts, -1)
 
     @cached_property
@@ -111,7 +111,7 @@ class BaseShape:
     def m222(self, eles):
         m = self.norm_fpts[..., None]*self.m0[:, None, :]
         s = eles.smat_at_np('fpts')
-        c = np.einsum('ijkl,jin->ljkn', s, m) # contract over ndims etc.
+        c = np.einsum('ijkl,jin->ljkn', s, m)
         return c.reshape(eles.neles, self.nfpts, -1)
 
     @cached_property
@@ -152,6 +152,13 @@ class BaseShape:
     @property
     def m9(self):
         return block_diag([self.m8]*self.ndims)
+    
+    def m999(self, eles):
+        m = self.m9
+        m = m.reshape(-1, self.ndims, self.nqpts)
+        s = eles.smat_at_np('qpts')
+        c = np.einsum('ijkl,nij->lnkj', s, m)
+        return c.reshape(eles.neles, -1, self.ndims*self.nqpts)
 
     @cached_property
     @clean

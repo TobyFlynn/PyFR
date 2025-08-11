@@ -91,7 +91,7 @@ class BaseAdvectionElements(BaseElements):
                 kernels['tdivtpcorf'] = lambda fout: self._be.kernel(
                     'batchmm', dims=[self.neles], 
                     tplargs={'na': self.nupts, 'nb': self.nqpts*self.ndims, 'nvars': self.nvars, 'beta': 0.0},
-                    A=self.opmat('(M111 - M3*M222)*M9'), u=self._vect_qpts,
+                    A=self.opmat('(M1 - M3*M2)*M999'), u=self._vect_qpts,
                     v=self.scal_upts[fout]
                 )
             else:

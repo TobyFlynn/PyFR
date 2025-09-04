@@ -217,6 +217,8 @@ class NavierStokesCharRiemInvMassFlowBCInters(MassFlowBCMixin,
                                               NavierStokesBaseBCInters):
     type = 'char-riem-inv-mass-flow'
     cflux_state = 'ghost'
+
+
 class NavierStokesBaseSlidingInters(TplargsMixin, BaseAdvectionDiffusionSlidingInters):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

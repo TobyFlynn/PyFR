@@ -246,6 +246,8 @@ class MassFlowBCMixin:
 
 class EulerCharRiemInvMassFlowBCInters(MassFlowBCMixin, EulerBaseBCInters):
     type = 'char-riem-inv-mass-flow'
+
+
 class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

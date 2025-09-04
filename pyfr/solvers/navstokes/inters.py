@@ -221,7 +221,39 @@ class NavierStokesBaseSlidingInters(TplargsMixin, BaseAdvectionDiffusionSlidingI
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        pass
+        self._be.pointwise.register('pyfr.solvers.navstokes.kernels.siintconulhs')
+        self._be.pointwise.register('pyfr.solvers.navstokes.kernels.siintconurhs')
+        self._be.pointwise.register('pyfr.solvers.navstokes.kernels.siintcfluxlhs')
+        self._be.pointwise.register('pyfr.solvers.navstokes.kernels.siintcfluxrhs')
+
+        self._tplargs |= dict(nvars=self.nvars, nftps=len(self.fpts), ninterfpts=self.ninterfpts)
+        self._tplargs |= dict(vel_l=(self.ul, self.vl), vel_r=(self.ur, self.vr))
+
+        self.kernels['con_u_lhs'] = lambda: self._be.kernel(
+            'siintconulhs', tplargs=self._tplargs, dims=[self.ninterfpts],
+            ulin=self._scal_lhs, urin=self._scal_lhs_interp,
+            ulout=self._comm_lhs
+        )
+
+        self.kernels['con_u_rhs'] = lambda: self._be.kernel(
+            'siintconurhs', tplargs=self._tplargs, dims=[self.ninterfpts],
+            ulin=self._scal_rhs_interp, urin=self._scal_rhs,
+            urout=self._comm_rhs
+        )
+
+        self.kernels['comm_flux_lhs'] = lambda: self._be.kernel(
+            'siintcfluxlhs', tplargs=self._tplargs, dims=[self.ninterfpts],
+            ul=self._scal_lhs, ur=self._scal_lhs_interp,
+            gradul=self._vect_lhs, gradur=self._vect_lhs_interp,
+            nl=self._pnorm_lhs
+        )
+
+        self.kernels['comm_flux_rhs'] = lambda: self._be.kernel(
+            'siintcfluxrhs', tplargs=self._tplargs, dims=[self.ninterfpts],
+            ul=self._scal_rhs_interp, ur=self._scal_rhs,
+            gradul=self._vect_rhs_interp, gradur=self._vect_rhs,
+            nl=self._pnorm_lhs
+        )
 
 
 class NavierStokesTranslationSlidingInters(NavierStokesBaseSlidingInters):

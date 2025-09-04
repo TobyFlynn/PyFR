@@ -1,3 +1,5 @@
+import numpy as np
+
 from pyfr.mpiutil import get_comm_rank_root
 from pyfr.solvers.baseadvec import (BaseAdvectionIntInters,
                                     BaseAdvectionMPIInters,
@@ -137,7 +139,7 @@ class BaseAdvectionDiffusionBCInters(BaseAdvectionBCInters):
 
 class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
     def __init__(self, be, lhs, elemap, cfgsect, cfg):
-        super().__init__(be, lhs, elemap, cfg)
+        super().__init__(be, lhs, elemap, cfgsect, cfg)
 
         # Generate the additional view matrices
         self._vect_lhs = self._vect_view(self.lhs, 'get_vect_fpts_for_inter')
@@ -150,3 +152,47 @@ class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
         
         # Additional kernel constants
         self.c |= cfg.items_as('solver-interfaces', float)
+
+        # Copies of face point data
+        tags = {'align'}
+        mat_size = (self.ndims, self.nvars, self.ninterfpts)
+        mat_size_copy = (self.ndims * self.nvars, self.ninterfpts)
+        zero_init = np.full(mat_size, 0.0)
+        zero_init_copy = np.full(mat_size_copy, 0.0)
+        self._vect_lhs_copy = self._be.matrix(mat_size_copy,
+                                              tags=tags, extent=f'sliding_lhs_copy_{self.name}',
+                                              initval=zero_init_copy)
+        self._vect_rhs_copy = self._be.matrix(mat_size_copy,
+                                              tags=tags, extent=f'sliding_rhs_copy_{self.name}',
+                                              initval=zero_init_copy)
+        self._vect_lhs_interp = self._be.matrix(mat_size,
+                                                tags=tags, extent=f'sliding_lhs_interp_{self.name}',
+                                                initval=zero_init)
+        self._vect_rhs_interp = self._be.matrix(mat_size,
+                                                tags=tags, extent=f'sliding_rhs_interp_{self.name}',
+                                                initval=zero_init)
+        
+        self._be.pointwise.register('pyfr.solvers.baseadvecdiff.kernels.sicopygrad')
+        self._be.pointwise.register('pyfr.solvers.baseadvecdiff.kernels.siinterpgrad')
+
+        tplargs = dict(nvars=self.nvars, ndims=self.ndims)
+
+        self.kernels['copy_fpts_grad_lhs'] = lambda: self._be.kernel(
+            'sicopygrad', tplargs=tplargs, dims=[self.ninterfpts], 
+            src=self._vect_lhs, dst=self._vect_lhs_copy
+        )
+        self.kernels['copy_fpts_grad_rhs'] = lambda: self._be.kernel(
+            'sicopygrad', tplargs=tplargs, dims=[self.ninterfpts], 
+            src=self._vect_rhs, dst=self._vect_rhs_copy
+        )
+
+        self.kernels['interp_fpts_grad_lhs'] = lambda: self._be.kernel(
+            'siinterpgrad', tplargs=self._tplargs, dims=[self.ninterfpts],
+            src=self._vect_rhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats,
+            dst=self._vect_lhs_interp
+        )
+        self.kernels['interp_fpts_grad_rhs'] = lambda: self._be.kernel(
+            'siinterpgrad', tplargs=self._tplargs, dims=[self.ninterfpts],
+            src=self._vect_lhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats,
+            dst=self._vect_rhs_interp
+        )

@@ -36,6 +36,10 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
                    deps=k['eles/entropy_filter'] + k['mpiint/ent_fpts_pack'])
         g1.add_all(k['bcint/comm_entropy'],
                    deps=k['eles/disu'])
+        g1.add_all(k['siint/comm_entropy_lhs'],
+                   deps=k['eles/disu'])
+        g1.add_all(k['siint/comm_entropy_rhs'],
+                   deps=k['eles/disu'])
 
         # Make a copy of the solution (if used by source terms)
         g1.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])
@@ -46,6 +50,20 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         kdeps = k['eles/copy_fpts'] or k['eles/disu']
         g1.add_all(k['iint/con_u'], deps=kdeps + k['mpiint/scal_fpts_pack'])
         g1.add_all(k['bcint/con_u'], deps=kdeps)
+        # For sliding interface we need to interpolate before con_u
+        g1.add_all(k['siint/copy_fpts_lhs'],
+                   deps=k['eles/disu'] + k['siint/comm_entropy_lhs'])
+        g1.add_all(k['siint/copy_fpts_rhs'],
+                   deps=k['eles/disu'] + k['siint/comm_entropy_rhs'])
+        g1.add_all(k['siint/interp_fpts_lhs'],
+                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+        g1.add_all(k['siint/interp_fpts_rhs'],
+                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+        # Now can do sliding interface con_u
+        g1.add_all(k['siint/con_u_lhs'],
+                   deps=k['siint/interp_fpts_lhs'] + k['siint/interp_fpts_rhs'])
+        g1.add_all(k['siint/con_u_rhs'],
+                   deps=k['siint/interp_fpts_lhs'] + k['siint/interp_fpts_rhs'])
 
         # Run the shock sensor (if enabled)
         g1.add_all(k['eles/shocksensor'])
@@ -101,6 +119,20 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g2.add_all(k['iint/comm_flux'],
                    deps=ideps, pdeps=k['mpiint/vect_fpts_pack'])
         g2.add_all(k['bcint/comm_flux'], deps=ideps)
+        # For sliding interface we need to interpolate gradient before comm_flux
+        g2.add_all(k['siint/copy_fpts_grad_lhs'],
+                   deps=ideps)
+        g2.add_all(k['siint/copy_fpts_grad_rhs'],
+                   deps=ideps)
+        g2.add_all(k['siint/interp_fpts_grad_lhs'],
+                   deps=k['siint/copy_fpts_grad_lhs'] + k['siint/copy_fpts_grad_rhs'])
+        g2.add_all(k['siint/interp_fpts_grad_rhs'],
+                   deps=k['siint/copy_fpts_grad_lhs'] + k['siint/copy_fpts_grad_rhs'])
+        # Now can do sliding interface comm_flux
+        g2.add_all(k['siint/comm_flux_lhs'],
+                   deps=k['siint/interp_fpts_grad_lhs'] + k['siint/interp_fpts_grad_rhs'])
+        g2.add_all(k['siint/comm_flux_rhs'],
+                   deps=k['siint/interp_fpts_grad_lhs'] + k['siint/interp_fpts_grad_rhs'])
 
         # Interpolate the gradients to the quadrature points
         for l in k['eles/gradcoru_qpts']:
@@ -206,6 +238,20 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         kdeps = k['eles/copy_fpts'] or k['eles/disu']
         g1.add_all(k['iint/con_u'], deps=kdeps)
         g1.add_all(k['bcint/con_u'], deps=kdeps)
+        # For sliding interface we need to interpolate before con_u
+        g1.add_all(k['siint/copy_fpts_lhs'],
+                   deps=kdeps)
+        g1.add_all(k['siint/copy_fpts_rhs'],
+                   deps=kdeps)
+        g1.add_all(k['siint/interp_fpts_lhs'],
+                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+        g1.add_all(k['siint/interp_fpts_rhs'],
+                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+        # Now can do sliding interface con_u
+        g1.add_all(k['siint/con_u_lhs'],
+                   deps=k['siint/interp_fpts_lhs'] + k['siint/interp_fpts_rhs'])
+        g1.add_all(k['siint/con_u_rhs'],
+                   deps=k['siint/interp_fpts_lhs'] + k['siint/interp_fpts_rhs'])
 
         # Compute the transformed gradient of the partially corrected solution
         g1.add_all(k['eles/tgradpcoru_upts'])

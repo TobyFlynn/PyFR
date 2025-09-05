@@ -185,6 +185,7 @@ class BaseAdvectionBCInters(BaseAdvectionIntersMixin, BaseInters):
 # - Single rank
 # - The interface is parallel to the y-axis (i.e. sign of the normal's x-component can split interface, also for pt to face mapping)
 # - Linear interface
+# - Entropy filtering is currently wrong
 class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     type = None
 

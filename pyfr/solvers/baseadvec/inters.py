@@ -189,12 +189,13 @@ class BaseAdvectionBCInters(BaseAdvectionIntersMixin, BaseInters):
 class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     type = None
 
-    def __init__(self, be, lhs, elemap, cfgsect, cfg):
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, sicomm):
         super().__init__(be, lhs, elemap, cfg)
 
         self.cfgsect = cfgsect
         self.name = cfgsect.removeprefix('soln-sliding-interface-')
         self.order = cfg.getint('solver', 'order')
+        self.comm = sicomm
 
         # Get translation
         self.ul = cfg.getfloat(cfgsect, 'ul')

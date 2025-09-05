@@ -261,5 +261,5 @@ class NavierStokesBaseSlidingInters(TplargsMixin, BaseAdvectionDiffusionSlidingI
 class NavierStokesTranslationSlidingInters(NavierStokesBaseSlidingInters):
     type = 'translation'
 
-    def __init__(self, be, lhs, elemap, cfgsect, cfg):
-        super().__init__(be, lhs, elemap, cfgsect, cfg)
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, sicomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg, sicomm)

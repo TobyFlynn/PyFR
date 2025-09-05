@@ -281,8 +281,9 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
                 entmin_lhs=self._entmin_rhs, entmin_rhs=self._entmin_lhs
             )
 
+
 class EulerTranslationSlidingInters(EulerBaseSlidingInters):
     type = 'translation'
 
-    def __init__(self, be, lhs, elemap, cfgsect, cfg):
-        super().__init__(be, lhs, elemap, cfgsect, cfg)
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, sicomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg, sicomm)

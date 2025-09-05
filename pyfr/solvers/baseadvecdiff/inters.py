@@ -138,8 +138,8 @@ class BaseAdvectionDiffusionBCInters(BaseAdvectionBCInters):
             self._artvisc_lhs = None
 
 class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
-    def __init__(self, be, lhs, elemap, cfgsect, cfg):
-        super().__init__(be, lhs, elemap, cfgsect, cfg)
+    def __init__(self, be, lhs, elemap, cfgsect, cfg, sicomm):
+        super().__init__(be, lhs, elemap, cfgsect, cfg, sicomm)
 
         # Generate the additional view matrices
         self._vect_lhs = self._vect_view(self.lhs, 'get_vect_fpts_for_inter')

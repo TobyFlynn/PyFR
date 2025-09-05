@@ -187,19 +187,30 @@ class BaseSystem:
         return bc_inters, bc_prefns
     
     def _load_sliding_inters(self, mesh, elemap):
+        comm, rank, root = get_comm_rank_root()
+
         sicls = self.bslidinginterscls
         simap = {b.type: b for b in subclasses(sicls, just_leaf=True)}
 
         si_inters = []
-        for bname, interarr in mesh.scon.items():
-            # Determine the config file section
-            cfgsect = f'soln-sliding-interface-{bname}'
+        for c in mesh.codec:
+            if not c.startswith('sliding/'):
+                continue
+        
+            # Construct an MPI communicator for this sliding interface
+            siname = c.removeprefix('sliding/')
+            localsi = siname in mesh.scon
+            sicomm = autofree(comm.Split(1 if localsi else mpi.UNDEFINED))
 
-            # Instantiate
-            siclass = simap[self.cfg.get(cfgsect, 'type')]
-            siface = siclass(self.backend, interarr, elemap, cfgsect,
-                             self.cfg)
-            si_inters.append(siface)
+            if localsi:
+                # Determine the config file section
+                cfgsect = f'soln-sliding-interface-{siname}'
+
+                # Instantiate
+                siclass = simap[self.cfg.get(cfgsect, 'type')]
+                siface = siclass(self.backend, mesh.scon[siname], elemap, 
+                                 cfgsect, self.cfg, sicomm)
+                si_inters.append(siface)
 
         return si_inters
 

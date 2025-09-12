@@ -255,31 +255,35 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
         self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxlhs')
         self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxrhs')
 
-        self._tplargs |= dict(nvars=self.nvars, nftps=len(self.fpts), ninterfpts=self.ninterfpts)
+        self._tplargs |= dict(nvars=self.nvars, nftps=len(self.fpts))
         self._tplargs |= dict(vel_l=(self.ul, self.vl), vel_r=(self.ur, self.vr))
 
-        self.kernels['comm_flux_lhs'] = lambda: self._be.kernel(
-            'siintcfluxlhs', tplargs=self._tplargs, dims=[self.ninterfpts],
-            ul=self._scal_lhs, ur=self._scal_lhs_interp, nl=self._pnorm_lhs
-        )
+        if self.ninters_lhs:
+            self.kernels['comm_flux_lhs'] = lambda: self._be.kernel(
+                'siintcfluxlhs', tplargs=self._tplargs, dims=[self.ninterfpts_lhs],
+                ul=self._scal_lhs, ur=self._scal_lhs_interp, nl=self._pnorm_lhs
+            )
 
-        self.kernels['comm_flux_rhs'] = lambda: self._be.kernel(
-            'siintcfluxrhs', tplargs=self._tplargs, dims=[self.ninterfpts],
-            ul=self._scal_rhs_interp, ur=self._scal_rhs, nr=self._pnorm_rhs
-        )
+        if self.ninters_rhs:
+            self.kernels['comm_flux_rhs'] = lambda: self._be.kernel(
+                'siintcfluxrhs', tplargs=self._tplargs, dims=[self.ninterfpts_rhs],
+                ul=self._scal_rhs_interp, ur=self._scal_rhs, nr=self._pnorm_rhs
+            )
 
         if self._ef_enabled:
             self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcent')
 
-            self.kernels['comm_entropy_lhs'] = lambda: self._be.kernel(
-                'siintcent', tplargs={}, dims=[self.ninters],
-                entmin_lhs=self._entmin_lhs, entmin_rhs=self._entmin_rhs
-            )
+            if self.ninters_lhs:
+                self.kernels['comm_entropy_lhs'] = lambda: self._be.kernel(
+                    'siintcent', tplargs={}, dims=[self.ninters_lhs],
+                    entmin_lhs=self._entmin_lhs
+                )
 
-            self.kernels['comm_entropy_rhs'] = lambda: self._be.kernel(
-                'siintcent', tplargs={}, dims=[self.ninters],
-                entmin_lhs=self._entmin_rhs, entmin_rhs=self._entmin_lhs
-            )
+            if self.ninters_rhs:
+                self.kernels['comm_entropy_rhs'] = lambda: self._be.kernel(
+                    'siintcent', tplargs={}, dims=[self.ninters_rhs],
+                    entmin_lhs=self._entmin_rhs
+                )
 
 
 class EulerTranslationSlidingInters(EulerBaseSlidingInters):

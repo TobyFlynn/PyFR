@@ -313,7 +313,7 @@ class BaseSystem:
             bfn(self, uinbank, t, bckerns[b])
         
         for b in self._sliding_inters:
-            b.interpolate(t)
+            b.prepare_interpolation(t)
 
         for b in binders:
             b(t=t)
@@ -325,8 +325,21 @@ class BaseSystem:
         self._rhs_uin_fout.add((uinbank, foutbank))
         self._prepare_kernels(t, uinbank, foutbank)
 
-        for graph in self._rhs_graphs(uinbank, foutbank):
+        graphs = self._rhs_graphs(uinbank, foutbank)
+
+        # Run first graph
+        self.backend.run_graph(graphs[0])
+
+        # Do sliding interface interpolation (currently on host but will change)
+        for b in self._sliding_inters:
+            b.interpolate()
+
+        # Run remaining graphs
+        for graph in graphs[1:]:
             self.backend.run_graph(graph)
+
+        # for graph in self._rhs_graphs(uinbank, foutbank):
+        #     self.backend.run_graph(graph)
 
     def _preproc_graphs(self, uinbank):
         pass

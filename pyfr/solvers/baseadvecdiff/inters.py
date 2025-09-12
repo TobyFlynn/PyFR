@@ -137,6 +137,7 @@ class BaseAdvectionDiffusionBCInters(BaseAdvectionBCInters):
         else:
             self._artvisc_lhs = None
 
+# TODO - hasn't been updated for MPI yet
 class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
     def __init__(self, be, lhs, elemap, cfgsect, cfg, sicomm):
         super().__init__(be, lhs, elemap, cfgsect, cfg, sicomm)

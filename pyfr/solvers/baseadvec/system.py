@@ -53,15 +53,10 @@ class BaseAdvectionSystem(BaseSystem):
         g1.add_all(k['siint/copy_fpts_rhs'],
                    deps=k['eles/disu'] + k['siint/comm_entropy_rhs'])
 
-        g1.add_all(k['siint/interp_fpts_lhs'],
-                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
-        g1.add_all(k['siint/interp_fpts_rhs'],
-                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
-
-        g1.add_all(k['siint/comm_flux_lhs'],
-                   deps=k['siint/interp_fpts_lhs'] + k['siint/interp_fpts_rhs'])
-        g1.add_all(k['siint/comm_flux_rhs'],
-                   deps=k['siint/interp_fpts_lhs'] + k['siint/interp_fpts_rhs'])
+        # g1.add_all(k['siint/interp_fpts_lhs'],
+        #            deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+        # g1.add_all(k['siint/interp_fpts_rhs'],
+        #            deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
 
         # Make a copy of the solution (if used by source terms)
         g1.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])
@@ -70,24 +65,27 @@ class BaseAdvectionSystem(BaseSystem):
 
         g2 = self.backend.graph()
 
+        g2.add_all(k['siint/comm_flux_lhs'])
+        g2.add_all(k['siint/comm_flux_rhs'])
+
         # Interpolate the solution to the quadrature points
-        g2.add_all(k['eles/qptsu'])
+        g2.add_all(k['eles/qptsu'], deps=k['siint/comm_flux_lhs'] + k['siint/comm_flux_rhs'])
 
         # Compute the transformed flux
         for l in k['eles/tdisf']:
-            g2.add(l, deps=deps(l, 'eles/qptsu'))
+            g2.add(l, deps=deps(l, 'eles/qptsu') + k['siint/comm_flux_lhs'] + k['siint/comm_flux_rhs'])
 
         # Compute the transformed divergence of the partially corrected flux
         for l in k['eles/tdivtpcorf']:
             g2.add(l, deps=deps(l, 'eles/tdisf'))
 
         # Compute the common normal flux at our MPI interfaces
-        g2.add_all(k['mpiint/scal_fpts_unpack'])
+        g2.add_all(k['mpiint/scal_fpts_unpack'], deps=k['siint/comm_flux_lhs'] + k['siint/comm_flux_rhs'])
         for l in k['mpiint/comm_flux']:
             g2.add(l, deps=deps(l, 'mpiint/scal_fpts_unpack'))
 
         # Compute common entropy minima at MPI interfaces
-        g2.add_all(k['mpiint/ent_fpts_unpack'])
+        g2.add_all(k['mpiint/ent_fpts_unpack'], deps=k['siint/comm_flux_lhs'] + k['siint/comm_flux_rhs'])
         for l in k['mpiint/comm_entropy']:
             g2.add(l, deps=deps(l, 'mpiint/ent_fpts_unpack'))
 

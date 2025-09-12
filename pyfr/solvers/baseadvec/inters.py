@@ -536,7 +536,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         # self._rhs_interp_mats.set(np.reshape(rhs_pts_interp_matrices, (-1, len(self.fpts))).swapaxes(0,1))
 
     def _do_interpolation(self, local_data, iinfo, imats, to_lhs):
+        # Constants for interpolation and change of frame of reference
         nfpts = len(self.fpts)
+        rhou_lhs_corr = self.ur - self.ul
+        rhov_lhs_corr = self.vr - self.vl
+        rhou_rhs_corr = self.ul - self.ur
+        rhov_rhs_corr = self.vl - self.vr
+
         idata_for_remote = np.zeros((self.nvars, len(iinfo)), dtype=self._be.fpdtype)
         for i in range(0, len(iinfo)):
             l_fidx = iinfo[i][0]
@@ -546,15 +552,17 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
             irhov = np.dot(imats[i], local_data[2, l_pidx_off:l_pidx_off+nfpts])
             ie    = np.dot(imats[i], local_data[3, l_pidx_off:l_pidx_off+nfpts])
             
-            # Change frame of reference
+            # Change frame of reference - I need to check the energy correction
             if to_lhs:
-                irhou = (irhou / irho + self.ur - self.ul) * irho
-                irhov = (irhov / irho + self.vr - self.vl) * irho
-                ie   += 0.5 * irho * (self.ul**2 - self.ur**2) # TODO - This is wrong
+                _u, _v = irhou / irho, irhov / irho
+                irhou = (_u + rhou_lhs_corr) * irho
+                irhov = (_v + rhov_lhs_corr) * irho
+                ie   -= 0.5 * irho * (_u**2 - (irhou/irho)**2 + _v**2 - (irhov/irho)**2)
             else:
-                irhou = (irhou / irho + self.ul - self.ur) * irho
-                irhov = (irhov / irho + self.vl - self.vr) * irho
-                ie   += 0.5 * irho * (self.ur**2 - self.ul**2) # TODO - This is wrong
+                _u, _v = irhou / irho, irhov / irho
+                irhou = (_u + rhou_rhs_corr) * irho
+                irhov = (_v + rhov_rhs_corr) * irho
+                ie   -= 0.5 * irho * (_u**2 - (irhou/irho)**2 + _v**2 - (irhov/irho)**2)
             
             idata_for_remote[0][i] = irho
             idata_for_remote[1][i] = irhou

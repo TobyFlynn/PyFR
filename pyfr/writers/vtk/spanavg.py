@@ -14,7 +14,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
 
     def _load_hex(self):
         if 'hex' not in self.mesh.spts:
-            return None, None
+            return None, None, None
 
         nspts, neles = self.mesh.spts['hex'].shape[:2]
 
@@ -112,7 +112,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
     
     def _load_pri(self):
         if 'pri' not in self.mesh.spts:
-            return None, None
+            return None, None, None
 
         nspts, neles = self.mesh.spts['pri'].shape[:2]
 
@@ -226,13 +226,13 @@ class VTKSpanAvgWriter(BaseVTKWriter):
 
         _mesh2d = SpanMeshAdapter()
 
-        if hexmesh2d:
+        if hexmesh2d is not None:
             _mesh2d.etypes.append('quad')
             _mesh2d.eidxs['quad'] = np.array([i for i in range(0, hexmesh2d.shape[1])])
             _mesh2d.spts['quad'] = hexmesh2d
             _mesh2d.spts_curved['quad'] = hexcurved
         
-        if primesh2d:
+        if primesh2d is not None:
             _mesh2d.etypes.append('pri')
             _mesh2d.eidxs['pri'] = np.array([i for i in range(0, primesh2d.shape[1])])
             _mesh2d.spts['pri'] = primesh2d
@@ -240,20 +240,20 @@ class VTKSpanAvgWriter(BaseVTKWriter):
 
         self.mesh = _mesh2d
 
-        if hexsoln2d:
+        if hexsoln2d is not None:
             self.soln['quad'] = hexsoln2d
             self.soln['quad-parts'] = np.ones((hexmesh2d.shape[1]))
         
-        if prisoln2d:
+        if prisoln2d is not None:
             self.soln['pri'] = prisoln2d
             self.soln['pri-parts'] = np.ones((primesh2d.shape[1]))
 
         # Update cfg for 2D
-        if hexmesh2d:
+        if hexmesh2d is not None:
             self.cfg.set('solver-elements-quad', 'soln-pts', self.cfg.get(f'solver-elements-{shape.name}', 'soln-pts'))
             self.cfg.rename_section('solver-elements-hex', 'z1')
         
-        if primesh2d:
+        if primesh2d is not None:
             self.cfg.set('solver-elements-tri', 'soln-pts', 'williams-shunn')
             self.cfg.rename_section('solver-elements-pri', 'z2')
 

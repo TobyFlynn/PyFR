@@ -250,7 +250,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
 
         # Update cfg for 2D
         if hexmesh2d is not None:
-            self.cfg.set('solver-elements-quad', 'soln-pts', self.cfg.get(f'solver-elements-{shape.name}', 'soln-pts'))
+            self.cfg.set('solver-elements-quad', 'soln-pts', self.cfg.get(f'solver-elements-hex', 'soln-pts'))
             self.cfg.rename_section('solver-elements-hex', 'z1')
         
         if primesh2d is not None:

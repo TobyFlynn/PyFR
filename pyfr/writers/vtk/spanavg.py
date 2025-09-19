@@ -233,10 +233,10 @@ class VTKSpanAvgWriter(BaseVTKWriter):
             _mesh2d.spts_curved['quad'] = hexcurved
         
         if primesh2d is not None:
-            _mesh2d.etypes.append('pri')
-            _mesh2d.eidxs['pri'] = np.array([i for i in range(0, primesh2d.shape[1])])
-            _mesh2d.spts['pri'] = primesh2d
-            _mesh2d.spts_curved['pri'] = pricurved
+            _mesh2d.etypes.append('tri')
+            _mesh2d.eidxs['tri'] = np.array([i for i in range(0, primesh2d.shape[1])])
+            _mesh2d.spts['tri'] = primesh2d
+            _mesh2d.spts_curved['tri'] = pricurved
 
         self.mesh = _mesh2d
 
@@ -245,8 +245,8 @@ class VTKSpanAvgWriter(BaseVTKWriter):
             self.soln['quad-parts'] = np.ones((hexmesh2d.shape[1]))
         
         if prisoln2d is not None:
-            self.soln['pri'] = prisoln2d
-            self.soln['pri-parts'] = np.ones((primesh2d.shape[1]))
+            self.soln['tri'] = prisoln2d
+            self.soln['tri-parts'] = np.ones((primesh2d.shape[1]))
 
         # Update cfg for 2D
         if hexmesh2d is not None:

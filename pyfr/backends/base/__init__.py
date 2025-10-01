@@ -6,4 +6,4 @@ from pyfr.backends.base.kernels import (BaseKernelProvider,
                                         NotSuitableError, NullKernel)
 from pyfr.backends.base.types import (ConstMatrix, Matrix, MatrixBase,
                                       MatrixSlice, Graph, View, XchgMatrix,
-                                      XchgView)
+                                      XchgView, ResizableMatrix)

@@ -174,6 +174,11 @@ class BaseBackend:
         return self.xchg_matrix_cls(self, self.fpdtype, ioshape, initval,
                                     extent, aliases, tags)
 
+    @recordmat
+    def resizable_matrix(self, ioshape, initval=None, tags=set(), dtype=None):
+        dtype = dtype or self.fpdtype
+        return self.resiable_matrix_cls(self, dtype, ioshape, initval, None, None, tags)
+
     def xchg_matrix_for_view(self, view, tags=set()):
         return self.xchg_matrix((view.nvrow, view.nvcol*view.n), tags=tags)
 

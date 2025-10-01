@@ -59,6 +59,16 @@ class OpenMPXchgView(base.XchgView): pass
 class OpenMPView(base.View): pass
 
 
+class OpenMPResizableMatrix(OpenMPMatrix, base.ResizableMatrix):
+    def _free_data(self):
+        del self.basedata
+        del self.data
+        del self._as_parameter_
+    
+    def _set(self, ary):
+        self.data[:self.nblocks,...] = self._pack(ary)
+
+
 class OpenMPGraph(base.Graph):
     needs_pdeps = False
 

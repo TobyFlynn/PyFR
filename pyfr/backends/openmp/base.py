@@ -45,6 +45,7 @@ class OpenMPBackend(BaseBackend):
         self.view_cls = types.OpenMPView
         self.xchg_matrix_cls = types.OpenMPXchgMatrix
         self.xchg_view_cls = types.OpenMPXchgView
+        self.resiable_matrix_cls = types.OpenMPResizableMatrix
         self.ordered_meta_kernel_cls = provider.OpenMPOrderedMetaKernel
         self.unordered_meta_kernel_cls = provider.OpenMPUnorderedMetaKernel
 

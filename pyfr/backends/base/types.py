@@ -212,6 +212,76 @@ class XchgMatrix(Matrix):
         return autofree(comm.Send_init(self.hdata, pid, tag))
 
 
+class ResizableMatrix(Matrix):
+    _base_tags = {'resizable'}
+
+    def __init__(self, backend, dtype, ioshape, initval, extent, aliases,
+                 tags):
+        super().__init__(backend, dtype, ioshape, initval, extent, aliases,
+                         tags)
+        
+        self.resizecount = 0
+    
+    # TODO check if extent ever used for this, 
+    # and if so I think this workflow won't work
+    def _realloc(self):
+        self.backend.malloc(self, None)
+    
+    # Invalidates the data held by the matrix
+    def resize(self, ioshape):
+        # Update variables relating to matrix size
+        oldnbytes = self.nbytes
+        # Our shape and dimensionality
+        shape, ndim = list(ioshape), len(ioshape)
+
+        # SoA and block column size
+        soasz, csubsz = self.backend.soasz, self.backend.csubsz
+
+        if ndim == 2:
+            nrow, ncol = shape
+
+            # Alignment requirement for the leading dimension
+            ldmod = csubsz if 'align' in self.tags else 1
+            blocked = self.backend.blocks and 'xchg' not in self.tags
+            leaddim = csubsz if blocked else ncol - (ncol % -ldmod)
+
+            nblocks = (ncol - (ncol % -leaddim)) // leaddim
+            datashape = [nblocks, nrow, leaddim]
+        else:
+            nvar, narr, k = shape[-2], shape[-1], soasz
+            nparr = narr - narr % -csubsz
+
+            nrow = shape[0] if ndim == 3 else shape[0]*shape[1]
+            ncol = nvar*nparr
+            leaddim = nvar*csubsz if self.backend.blocks else ncol
+
+            nblocks = (ncol - (ncol % -leaddim)) // leaddim
+            datashape = [nblocks, *shape[:-2], nparr // (nblocks*k), nvar, k]
+
+        # Assign
+        self.nrow, self.ncol, self.leaddim = nrow, ncol, leaddim
+
+        # self.datashape = datashape
+        self.ioshape = ioshape
+
+        self.splitsz = leaddim if self.backend.blocks else soasz
+        self.blocksz = nrow*leaddim
+        self.nblocks = nblocks
+
+        self.nbytes = self.nblocks*self.blocksz*self.itemsize
+        self.traits = (self.nblocks, nrow, ncol, leaddim, self.dtype)
+
+        # Check if nbytes exceeds previously allocated memory
+        if self.nbytes > oldnbytes:
+            raise Exception('Kernels not ready yet to update pointers to newly allocated buffers')
+            # Free and reallocate if needed
+            self._free_data()
+            self._realloc()
+            self.datashape = datashape
+
+        # Increment resize counter so kernels know to update themselves
+        self.resizecount += 1
+
 class View:
     def __init__(self, backend, matmap, rmap, cmap, rstridemap, vshape, tags):
         self.n = len(matmap)

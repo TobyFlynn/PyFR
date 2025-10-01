@@ -71,7 +71,7 @@ class BaseSystem:
         self._int_inters = self._load_int_inters(mesh, elemap)
         self._mpi_inters = self._load_mpi_inters(mesh, elemap)
         self._bc_inters, self._bc_prefns = self._load_bc_inters(mesh, elemap)
-        self._sliding_inters = self._load_sliding_inters(mesh, elemap)
+        self._sliding_inters, self._sliding_names = self._load_sliding_inters(mesh, elemap)
         backend.commit()
 
     def commit(self):
@@ -192,7 +192,7 @@ class BaseSystem:
         sicls = self.bslidinginterscls
         simap = {b.type: b for b in subclasses(sicls, just_leaf=True)}
 
-        si_inters = []
+        si_inters, si_names = [], []
         for c in mesh.codec:
             if not c.startswith('sliding/'):
                 continue
@@ -211,8 +211,9 @@ class BaseSystem:
                 siface = siclass(self.backend, mesh.scon[siname], elemap, 
                                  cfgsect, self.cfg, sicomm)
                 si_inters.append(siface)
+                si_names.append(siname)
 
-        return si_inters
+        return si_inters, si_names
 
     def _gen_kernels(self, nregs, eles, iint, mpiint, bcint, siint):
         self._kernels = kernels = defaultdict(list)
@@ -282,7 +283,7 @@ class BaseSystem:
                 kernels[kn].extend(k)
 
         # Handle kernels which have arguments that can be bound at runtime
-        binders, bckerns = [], defaultdict(dict)
+        binders, bckerns, sikerns = [], defaultdict(dict), defaultdict(dict)
         for kn, kerns in kernels.items():
             for k in kerns:
                 if bind := getattr(k, 'bind', None):
@@ -293,8 +294,14 @@ class BaseSystem:
                     bkname = kn.removeprefix('bcint/')
 
                     bckerns[bcname][bkname] = k
+                
+                if kn.startswith('siint/'):
+                    siname = self._ktags[k].removeprefix('siint/')
+                    skname = kn.removeprefix('siint/')
 
-        return kernels, binders, bckerns
+                    sikerns[siname][skname] = k
+
+        return kernels, binders, bckerns, sikerns
 
     def _kdeps(self, kdict, kern, *dnames):
         deps = []
@@ -307,13 +314,13 @@ class BaseSystem:
         return deps
 
     def _prepare_kernels(self, t, uinbank, foutbank):
-        _, binders, bckerns = self._get_kernels(uinbank, foutbank)
+        _, binders, bckerns, sikerns = self._get_kernels(uinbank, foutbank)
 
         for b, bfn in self._bc_prefns.items():
             bfn(self, uinbank, t, bckerns[b])
         
-        for b in self._sliding_inters:
-            b.prepare_interpolation(t)
+        for b, siname in zip(self._sliding_inters, self._sliding_names):
+            b.prepare_interpolation(t, sikerns[siname])
 
         for b in binders:
             b(t=t)

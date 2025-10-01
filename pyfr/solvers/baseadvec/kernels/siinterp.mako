@@ -17,22 +17,21 @@
 % endfor
 
     // Account for changing the frame of reference
+    fpdtype_t _u = dst[1] / dst[0];
+    fpdtype_t _v = dst[2] / dst[0];
 % if lhs:
-    // Rho is constant
-    // Rhou
-    dst[1] = (dst[1] / dst[0] + ${vel_r[0] - vel_l[0]}) * dst[0];
-    // Rhov
-    dst[2] = (dst[2] / dst[0] + ${vel_r[1] - vel_l[1]}) * dst[0];
-    // E
-    dst[3] += 0.5 * dst[0] * (${vel_l[0]**2} - ${vel_r[0]**2});
+    fpdtype_t new_u = _u + ${vel_r[0] - vel_l[0]};
+    fpdtype_t new_v = _v + ${vel_r[1] - vel_l[1]};
 % else:
+    fpdtype_t new_u = _u + ${vel_l[0] - vel_r[0]};
+    fpdtype_t new_v = _v + ${vel_l[1] - vel_r[1]};
+% endif
     // Rho is constant
     // Rhou
-    dst[1] = (dst[1] / dst[0] + (${vel_l[0] - vel_r[0]})) * dst[0];
+    dst[1] = new_u * dst[0];
     // Rhov
-    dst[2] = (dst[2] / dst[0] + (${vel_l[1] - vel_r[1]})) * dst[0];
+    dst[2] = new_v * dst[0];
     // E
-    dst[3] += 0.5 * dst[0] * (${vel_r[0]**2} - ${vel_l[0]**2});
-% endif
+    dst[3] -= 0.5 * dst[0] * (_u * _u - new_u * new_u + _v * _v - new_v * new_v);
 
 </%pyfr:kernel>

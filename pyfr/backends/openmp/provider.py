@@ -182,6 +182,12 @@ class OpenMPPointwiseKernelProvider(OpenMPKernelProvider,
                 fun.set_arg(i, k)
 
         class PointwiseKernel(OpenMPKernel):
+            def update_dims(self, _dims):
+                if len(dims) != len(_dims):
+                    raise Exception('Trying to update dims with a different dimension to original declaration')
+                for i, d in enumerate(_dims):
+                    self.kernel.set_arg(i, d)
+
             if rtargs:
                 def bind(self, **kwargs):
                     for i, k in rtargs:

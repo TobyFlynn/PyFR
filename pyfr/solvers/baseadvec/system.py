@@ -52,11 +52,16 @@ class BaseAdvectionSystem(BaseSystem):
                    deps=k['eles/disu'] + k['siint/comm_entropy_lhs'])
         g1.add_all(k['siint/copy_fpts_rhs'],
                    deps=k['eles/disu'] + k['siint/comm_entropy_rhs'])
+        
+        g1.add_all(k['siint/calc_mats_for_remote_lhs'],
+                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+        g1.add_all(k['siint/calc_mats_for_remote_rhs'],
+                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
 
         g1.add_all(k['siint/interp_fpts_for_remote_lhs'],
-                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+                   deps=k['siint/calc_mats_for_remote_lhs'])
         g1.add_all(k['siint/interp_fpts_for_remote_rhs'],
-                   deps=k['siint/copy_fpts_lhs'] + k['siint/copy_fpts_rhs'])
+                   deps=k['siint/calc_mats_for_remote_rhs'])
 
         # Make a copy of the solution (if used by source terms)
         g1.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])

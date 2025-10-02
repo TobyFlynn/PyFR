@@ -180,6 +180,8 @@ class BaseAdvectionBCInters(BaseAdvectionIntersMixin, BaseInters):
 
         return exprs
 
+import time
+
 # Current assumptions:
 # - 2D
 # - The interface is parallel to the y-axis (i.e. sign of the normal's x-component can split interface, also for pt to face mapping)
@@ -271,6 +273,11 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                                          initval=zero_init, dtype=self._be.ixdtype)
         self._rhs_fidx = self._be.resizable_matrix(mat_size_fidx, tags=tags,
                                          initval=zero_init, dtype=self._be.ixdtype)
+        zero_init = np.full(mat_size_fidx, 0.0)
+        self._lhs_rloc = self._be.resizable_matrix(mat_size_fidx, tags=tags,
+                                         initval=zero_init)
+        self._rhs_rloc = self._be.resizable_matrix(mat_size_fidx, tags=tags,
+                                         initval=zero_init)
         mat_size_interp = (len(self.fpts), max_ninterfpts)
         zero_init = np.full(mat_size_interp, 0.0)
         self._lhs_interp_mats = self._be.resizable_matrix(mat_size_interp, tags=tags,
@@ -287,6 +294,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         # Kernels common across all solver
         self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.sicopy')
         self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.siinterp')
+        self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.sicalcmats')
 
         tplargs = dict(nvars=self.nvars)
 
@@ -313,6 +321,28 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                 src=self._scal_lhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats,
                 dst=self._interp_results_for_remote_rhs
             )
+        
+        self._invvdm = self._be.const_matrix(self._face_polybasis.invvdm)
+        if self.ninters_rhs:
+            self.kernels['calc_mats_for_remote_lhs'] = lambda: self._be.kernel(
+                'sicalcmats', tplargs=self._tplargs, dims=[max_ninterfpts],
+                rloc=self._rhs_rloc, out=self._rhs_interp_mats, invvdm=self._invvdm
+            )
+        if self.ninters_lhs:
+            self.kernels['calc_mats_for_remote_rhs'] = lambda: self._be.kernel(
+                'sicalcmats', tplargs=self._tplargs, dims=[max_ninterfpts],
+                rloc=self._lhs_rloc, out=self._lhs_interp_mats, invvdm=self._invvdm
+            )
+        
+        self._prepare_time = 0.0
+        self._prepare1_time = 0.0
+        self._prepare2_time = 0.0
+        self._prepare3_time = 0.0
+        self._prepare4_time = 0.0
+        self._prepare5_time = 0.0
+        self._comm_time = 0.0
+        self._tstart = time.time()
+        self._t_counter = 0
     
     def _split_lhs_rhs(self, elemap, allf):
         # Get the normal of each face
@@ -506,37 +536,55 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         return 2.0 * ((pt_ploc[1] - face_bounds[0]) / (face_bounds[1] - face_bounds[0])) - 1.0
     
     def _get_interp_mats_for_pts(self, pts_ploc, faces_bounds, interp_info):
-        mats = []
+        rlocs = []
         for fidx, rank, pidx in interp_info:
             face_bounds = faces_bounds[fidx]
             rloc = self._get_rloc(pts_ploc[rank][pidx], face_bounds)
-            mats.append(self._face_polybasis.nodal_basis_at([rloc]))
-        return mats
+            rlocs.append(rloc)
+        return self._face_polybasis.nodal_basis_at(rlocs)
+    
+    def _get_rloc_for_pts(self, pts_ploc, faces_bounds, interp_info):
+        rlocs = []
+        for fidx, rank, pidx in interp_info:
+            face_bounds = faces_bounds[fidx]
+            rloc = self._get_rloc(pts_ploc[rank][pidx], face_bounds)
+            rlocs.append(rloc)
+        return np.array(rlocs)
 
     def prepare_interpolation(self, t, kerns):
+        tstart = time.time()
         # Get the current plocs of each face point
         lhs_plocs, rhs_plocs = self._apply_transform_local(t)
         lhs_face_bounds, rhs_face_bounds = self.global_lhs_bounds, self.global_rhs_bounds
+        self._prepare1_time += time.time() - tstart
+        tstart1 = time.time()
 
         # Work out which rank and face contains each local face point
         self.lhs_pts_rhs_fidx = self._get_rank_fidx_for_pts(lhs_plocs, rhs_face_bounds)
         self.rhs_pts_lhs_fidx = self._get_rank_fidx_for_pts(rhs_plocs, lhs_face_bounds)
+        self._prepare2_time += time.time() - tstart1
+        tstart1 = time.time()
 
         # Work out which interpolations we'll need to perform before sending to other ranks
         global_lhs_plocs, global_rhs_plocs = self._apply_transform_global(t)
         self.lhs_interps_for_remote_rhs = self._get_fidx_rank_pidx(global_rhs_plocs, self._lhs_face_bounds)
         self.rhs_interps_for_remote_lhs = self._get_fidx_rank_pidx(global_lhs_plocs, self._rhs_face_bounds)
+        self._prepare3_time += time.time() - tstart1
+        tstart1 = time.time()
 
         # Calculate matrix to interpolate to face point
-        self.lhs_interp_matrices_for_remote_rhs = self._get_interp_mats_for_pts(global_rhs_plocs, self._lhs_face_bounds, self.lhs_interps_for_remote_rhs)
-        self.rhs_interp_matrices_for_remote_lhs = self._get_interp_mats_for_pts(global_lhs_plocs, self._rhs_face_bounds, self.rhs_interps_for_remote_lhs)
-
-        self.lhs_interp_matrices_for_remote_rhs = np.reshape(self.lhs_interp_matrices_for_remote_rhs, (-1, len(self.fpts)))
-        self.rhs_interp_matrices_for_remote_lhs = np.reshape(self.rhs_interp_matrices_for_remote_lhs, (-1, len(self.fpts)))
+        # self.lhs_interp_matrices_for_remote_rhs = self._get_interp_mats_for_pts(global_rhs_plocs, self._lhs_face_bounds, self.lhs_interps_for_remote_rhs)
+        # self.rhs_interp_matrices_for_remote_lhs = self._get_interp_mats_for_pts(global_lhs_plocs, self._rhs_face_bounds, self.rhs_interps_for_remote_lhs)
+        self.rlocs_remote_rhs = self._get_rloc_for_pts(global_rhs_plocs, self._lhs_face_bounds, self.lhs_interps_for_remote_rhs)
+        self.rlocs_remote_lhs = self._get_rloc_for_pts(global_lhs_plocs, self._rhs_face_bounds, self.rhs_interps_for_remote_lhs)
+        self._prepare4_time += time.time() - tstart1
+        tstart1 = time.time()
 
         # Update sizes of backend matrices
         self._lhs_fidx.resize((1, len(self.lhs_interps_for_remote_rhs)))
         self._rhs_fidx.resize((1, len(self.rhs_interps_for_remote_lhs)))
+        self._lhs_rloc.resize((1, len(self.lhs_interps_for_remote_rhs)))
+        self._rhs_rloc.resize((1, len(self.rhs_interps_for_remote_lhs)))
         self._lhs_interp_mats.resize((len(self.fpts), len(self.lhs_interps_for_remote_rhs)))
         self._rhs_interp_mats.resize((len(self.fpts), len(self.rhs_interps_for_remote_lhs)))
         self._interp_results_for_remote_lhs.resize((self.nvars, len(self.rhs_interps_for_remote_lhs)))
@@ -547,14 +595,21 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._lhs_fidx.set(np.reshape(lhs_fidx, (-1, 1)).swapaxes(0,1))
         rhs_fidx = np.array([[fidx for fidx, _, _ in self.rhs_interps_for_remote_lhs]])
         self._rhs_fidx.set(np.reshape(rhs_fidx, (-1, 1)).swapaxes(0,1))
-        self._lhs_interp_mats.set(np.reshape(self.lhs_interp_matrices_for_remote_rhs, (-1, len(self.fpts))).swapaxes(0,1))
-        self._rhs_interp_mats.set(np.reshape(self.rhs_interp_matrices_for_remote_lhs, (-1, len(self.fpts))).swapaxes(0,1))
+        # self._lhs_interp_mats.set(np.reshape(self.lhs_interp_matrices_for_remote_rhs, (-1, len(self.fpts))).swapaxes(0,1))
+        # self._rhs_interp_mats.set(np.reshape(self.rhs_interp_matrices_for_remote_lhs, (-1, len(self.fpts))).swapaxes(0,1))
+        self._lhs_rloc.set(np.reshape(self.rlocs_remote_rhs, (-1, 1)).swapaxes(0,1))
+        self._rhs_rloc.set(np.reshape(self.rlocs_remote_lhs, (-1, 1)).swapaxes(0,1))
 
         # Update dims of interpolation kernels
         if self.ninters_rhs:
             kerns['interp_fpts_for_remote_lhs'].update_dims([len(self.rhs_interps_for_remote_lhs)])
+            kerns['calc_mats_for_remote_lhs'].update_dims([len(self.rhs_interps_for_remote_lhs)])
         if self.ninters_lhs:
             kerns['interp_fpts_for_remote_rhs'].update_dims([len(self.lhs_interps_for_remote_rhs)])
+            kerns['calc_mats_for_remote_rhs'].update_dims([len(self.lhs_interps_for_remote_rhs)])
+        
+        self._prepare5_time += time.time() - tstart1
+        self._prepare_time += time.time() - tstart
 
     # Count number of interpolated points to expect from a rank
     def _count_recv_pts(self, rfinfo, rank):
@@ -591,10 +646,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     # TODO - do this via mako kernels, just doing it here for now to avoid issue with varying numbers of points across different time steps
     def interpolate(self):
-        # Get LHS and RHS data
-        local_lhs_data = self._scal_lhs_copy.get() if self.ninters_lhs else None
-        local_rhs_data = self._scal_rhs_copy.get() if self.ninters_rhs else None
-
+        tstart = time.time()
         lhs2rhs_iinfo = self.lhs_interps_for_remote_rhs
         rhs2lhs_iinfo = self.rhs_interps_for_remote_lhs
 
@@ -690,3 +742,9 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         if self.ninters_rhs:
             self._unpack_recv_buffers(rhs_rcv_buffers, local_rhs_interp, self.rhs_pts_lhs_fidx)
             self._scal_rhs_interp.set(local_rhs_interp)
+        
+        self._comm_time += time.time() - tstart
+        self._t_counter += 1
+
+        if self._t_counter % 1000 == 0:
+            print(f'{time.time() - self._tstart}, {self._prepare_time}, {self._comm_time} : {self._prepare1_time}, {self._prepare2_time}, {self._prepare3_time}, {self._prepare4_time}, {self._prepare5_time}')

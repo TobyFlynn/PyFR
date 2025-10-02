@@ -1,4 +1,5 @@
 import numpy as np
+import time
 
 from pyfr.mpiutil import get_comm_rank_root
 from pyfr.solvers.baseadvec import (BaseAdvectionIntInters,
@@ -137,16 +138,13 @@ class BaseAdvectionDiffusionBCInters(BaseAdvectionBCInters):
         else:
             self._artvisc_lhs = None
 
-# TODO - hasn't been updated for MPI yet
+
 class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
+    LHS_GRAD_MPI_TAG = 3458
+    RHS_GRAD_MPI_TAG = 3459
+
     def __init__(self, be, lhs, elemap, cfgsect, cfg, sicomm):
         super().__init__(be, lhs, elemap, cfgsect, cfg, sicomm)
-
-        # Generate the additional view matrices
-        self._vect_lhs = self._vect_view(self.lhs, 'get_vect_fpts_for_inter')
-        self._vect_rhs = self._vect_view(self.rhs, 'get_vect_fpts_for_inter')
-        self._comm_lhs = self._scal_view(self.lhs, 'get_comm_fpts_for_inter')
-        self._comm_rhs = self._scal_view(self.rhs, 'get_comm_fpts_for_inter')
 
         if cfg.get('solver', 'shock-capturing') == 'artificial-viscosity':
             raise Exception(f'artificial viscosity and sliding interfaces has not been implemented')
@@ -156,44 +154,198 @@ class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
 
         # Copies of face point data
         tags = {'align'}
-        mat_size = (self.ndims, self.nvars, self.ninterfpts)
-        mat_size_copy = (self.ndims * self.nvars, self.ninterfpts)
-        zero_init = np.full(mat_size, 0.0)
-        zero_init_copy = np.full(mat_size_copy, 0.0)
-        self._vect_lhs_copy = self._be.matrix(mat_size_copy,
+        if self.ninters_lhs:
+            self._vect_lhs = self._vect_view(self.lhs, 'get_vect_fpts_for_inter')
+            self._comm_lhs = self._scal_view(self.lhs, 'get_comm_fpts_for_inter')
+            mat_size_copy = (self.ndims * self.nvars, self.ninterfpts_lhs)
+            self._vect_lhs_copy = self._be.matrix(mat_size_copy,
                                               tags=tags, extent=f'sliding_lhs_copy_{self.name}',
-                                              initval=zero_init_copy)
-        self._vect_rhs_copy = self._be.matrix(mat_size_copy,
-                                              tags=tags, extent=f'sliding_rhs_copy_{self.name}',
-                                              initval=zero_init_copy)
-        self._vect_lhs_interp = self._be.matrix(mat_size,
+                                              initval=np.full(mat_size_copy, 0.0))
+            mat_size = (self.ndims, self.nvars, self.ninterfpts_lhs)
+            self._vect_lhs_interp = self._be.matrix(mat_size,
                                                 tags=tags, extent=f'sliding_lhs_interp_{self.name}',
-                                                initval=zero_init)
-        self._vect_rhs_interp = self._be.matrix(mat_size,
+                                                initval=np.full(mat_size, 0.0))
+        if self.ninters_rhs:
+            self._vect_rhs = self._vect_view(self.rhs, 'get_vect_fpts_for_inter')
+            self._comm_rhs = self._scal_view(self.rhs, 'get_comm_fpts_for_inter')
+            mat_size_copy = (self.ndims * self.nvars, self.ninterfpts_rhs)
+            self._vect_rhs_copy = self._be.matrix(mat_size_copy,
+                                              tags=tags, extent=f'sliding_rhs_copy_{self.name}',
+                                              initval=np.full(mat_size_copy, 0.0))
+            mat_size = (self.ndims, self.nvars, self.ninterfpts_rhs)
+            self._vect_rhs_interp = self._be.matrix(mat_size,
                                                 tags=tags, extent=f'sliding_rhs_interp_{self.name}',
-                                                initval=zero_init)
+                                                initval=np.full(mat_size, 0.0))
+        
+        mat_size_remote_results = (self.ndims, self.nvars, self.max_ninterfpts)
+        zero_init = np.full(mat_size_remote_results, 0.0)
+        self._interp_results_grad_for_remote_lhs = self._be.resizable_matrix(mat_size_remote_results,
+                                                tags=tags, initval=zero_init)
+        self._interp_results_grad_for_remote_rhs = self._be.resizable_matrix(mat_size_remote_results,
+                                                tags=tags, initval=zero_init)
         
         self._be.pointwise.register('pyfr.solvers.baseadvecdiff.kernels.sicopygrad')
         self._be.pointwise.register('pyfr.solvers.baseadvecdiff.kernels.siinterpgrad')
 
         tplargs = dict(nvars=self.nvars, ndims=self.ndims)
 
-        self.kernels['copy_fpts_grad_lhs'] = lambda: self._be.kernel(
-            'sicopygrad', tplargs=tplargs, dims=[self.ninterfpts], 
-            src=self._vect_lhs, dst=self._vect_lhs_copy
-        )
-        self.kernels['copy_fpts_grad_rhs'] = lambda: self._be.kernel(
-            'sicopygrad', tplargs=tplargs, dims=[self.ninterfpts], 
-            src=self._vect_rhs, dst=self._vect_rhs_copy
-        )
+        if self.ninters_lhs:
+            self.kernels['copy_fpts_grad_lhs'] = lambda: self._be.kernel(
+                'sicopygrad', tplargs=tplargs, dims=[self.ninterfpts_lhs], 
+                src=self._vect_lhs, dst=self._vect_lhs_copy
+            )
 
-        self.kernels['interp_fpts_grad_lhs'] = lambda: self._be.kernel(
-            'siinterpgrad', tplargs=self._tplargs, dims=[self.ninterfpts],
-            src=self._vect_rhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats,
-            dst=self._vect_lhs_interp
-        )
-        self.kernels['interp_fpts_grad_rhs'] = lambda: self._be.kernel(
-            'siinterpgrad', tplargs=self._tplargs, dims=[self.ninterfpts],
-            src=self._vect_lhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats,
-            dst=self._vect_rhs_interp
-        )
+        if self.ninters_rhs:
+            self.kernels['copy_fpts_grad_rhs'] = lambda: self._be.kernel(
+                'sicopygrad', tplargs=tplargs, dims=[self.ninterfpts_rhs], 
+                src=self._vect_rhs, dst=self._vect_rhs_copy
+            )
+
+        if self.ninters_rhs:
+            self.kernels['interp_fpts_grad_for_remote_lhs'] = lambda: self._be.kernel(
+                'siinterpgrad', tplargs=self._tplargs | dict(ninterfpts=self.ninterfpts_rhs), dims=[self.max_ninterfpts],
+                src=self._vect_rhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats,
+                dst=self._interp_results_grad_for_remote_lhs
+            )
+        
+        if self.ninters_lhs:
+            self.kernels['interp_fpts_grad_for_remote_rhs'] = lambda: self._be.kernel(
+                'siinterpgrad', tplargs=self._tplargs | dict(ninterfpts=self.ninterfpts_lhs), dims=[self.max_ninterfpts],
+                src=self._vect_lhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats,
+                dst=self._interp_results_grad_for_remote_rhs
+            )
+        
+        self._grad_comm_time = 0.0
+    
+    def prepare_interpolation(self, t, kerns):
+        super().prepare_interpolation(t, kerns)
+
+        # Update sizes of backend matrices
+        self._interp_results_grad_for_remote_lhs.resize((self.ndims, self.nvars, max(len(self.rhs_interps_for_remote_lhs),1)))
+        self._interp_results_grad_for_remote_rhs.resize((self.ndims, self.nvars, max(len(self.lhs_interps_for_remote_rhs),1)))
+
+        # Update dims of interpolation kernels
+        if self.ninters_rhs:
+            kerns['interp_fpts_grad_for_remote_lhs'].update_dims([len(self.rhs_interps_for_remote_lhs)])
+        if self.ninters_lhs:
+            kerns['interp_fpts_grad_for_remote_rhs'].update_dims([len(self.lhs_interps_for_remote_rhs)])
+    
+    def _pack_send_grad_buffer(self, iinfo, idata, buf, rank):
+        bidx = 0
+        for i in range(0, len(iinfo)):
+            if iinfo[i][1] == rank:
+                buf[bidx:bidx+self.nvars*self.ndims] = np.reshape(idata[:,:,i], (-1))
+                bidx += self.nvars*self.ndims
+
+    def _unpack_recv_grad_buffers(self, rcv_bufs, local_buf, rfinfo):
+        rank_counts = [0] * self.comm.size
+        for i in range(0, len(rfinfo)):
+            rank = rfinfo[i][0]
+            if rank != self.comm.rank:
+                rcv_idx = rank_counts[rank] * self.nvars * self.ndims
+                local_buf[:,:,i] = np.reshape(rcv_bufs[rank][rcv_idx:rcv_idx+self.nvars*self.ndims],(self.ndims, self.nvars))
+                rank_counts[rank] += 1
+
+    def interpolate_grad(self):
+        tstart = time.time()
+        lhs2rhs_iinfo = self.lhs_interps_for_remote_rhs
+        rhs2lhs_iinfo = self.rhs_interps_for_remote_lhs
+
+        # Do the interpolation
+        if self.ninters_lhs:
+            idata_for_remote_rhs = self._interp_results_grad_for_remote_rhs.get()
+        if self.ninters_rhs:
+            idata_for_remote_lhs = self._interp_results_grad_for_remote_lhs.get()
+
+        # Create send/recv buffers
+        lhs_rcv_counts = []
+        rhs_rcv_counts = []
+        lhs_snd_counts = []
+        rhs_snd_counts = []
+        lhs_rcv_buffers = []
+        rhs_rcv_buffers = []
+        lhs_snd_buffers = []
+        rhs_snd_buffers = []
+        for rank in range(0, self.comm.size):
+            # Skip local rank
+            if rank == self.comm.rank:
+                lhs_rcv_counts.append(0)
+                rhs_rcv_counts.append(0)
+                lhs_snd_counts.append(0)
+                rhs_snd_counts.append(0)
+                lhs_rcv_buffers.append(None)
+                rhs_rcv_buffers.append(None)
+                lhs_snd_buffers.append(None)
+                rhs_snd_buffers.append(None)
+                continue
+
+            # Check how much we are expecting to receive from this rank
+            lhs_recv = self._count_recv_pts(self.lhs_pts_rhs_fidx, rank)
+            rhs_recv = self._count_recv_pts(self.rhs_pts_lhs_fidx, rank)
+            lhs_rcv_counts.append(lhs_recv)
+            rhs_rcv_counts.append(rhs_recv)
+
+            # Create recv buffer
+            lhs_rcv_buffers.append(np.zeros((self.ndims * self.nvars * lhs_recv), dtype=self._be.fpdtype))
+            rhs_rcv_buffers.append(np.zeros((self.ndims * self.nvars * rhs_recv), dtype=self._be.fpdtype))
+
+            # Check how much we are sending to this rank
+            lhs_send = self._count_send_pts(rhs2lhs_iinfo, rank)
+            rhs_send = self._count_send_pts(lhs2rhs_iinfo, rank)
+            lhs_snd_counts.append(lhs_send)
+            rhs_snd_counts.append(rhs_send)
+
+            # Create send buffer
+            lhs_snd_buffers.append(np.zeros((self.ndims * self.nvars * lhs_send), dtype=self._be.fpdtype))
+            rhs_snd_buffers.append(np.zeros((self.ndims * self.nvars * rhs_send), dtype=self._be.fpdtype))
+
+
+        # Buffer for final unpacked data
+        local_lhs_interp = np.zeros((self.ndims, self.nvars, self.ninterfpts_lhs), dtype=self._be.fpdtype)
+        local_rhs_interp = np.zeros((self.ndims, self.nvars, self.ninterfpts_rhs), dtype=self._be.fpdtype)
+
+        # Send/Recv interpolated data
+        mpi_requests = []
+        for rank in range(0, self.comm.size):
+            if rank == self.comm.rank:
+                # Copy interpolated data that will stay locally
+                for iidx in range(0, len(lhs2rhs_iinfo)):
+                    if lhs2rhs_iinfo[iidx][1] == self.comm.rank:
+                        local_rhs_interp[:,:,lhs2rhs_iinfo[iidx][2]] = idata_for_remote_rhs[:,:,iidx]
+                for iidx in range(0, len(rhs2lhs_iinfo)):
+                    if rhs2lhs_iinfo[iidx][1] == self.comm.rank:
+                        local_lhs_interp[:,:,rhs2lhs_iinfo[iidx][2]] = idata_for_remote_lhs[:,:,iidx]
+            else:
+                # Non-blocking receive
+                if lhs_rcv_counts[rank] > 0:
+                    mpi_requests.append(self.comm.Irecv(lhs_rcv_buffers[rank], rank, self.LHS_GRAD_MPI_TAG))
+                if rhs_rcv_counts[rank] > 0:
+                    mpi_requests.append(self.comm.Irecv(rhs_rcv_buffers[rank], rank, self.RHS_GRAD_MPI_TAG))
+
+                # Pack data to send to this rank and non-blocking send
+                if lhs_snd_counts[rank] > 0:
+                    self._pack_send_grad_buffer(rhs2lhs_iinfo, idata_for_remote_lhs, lhs_snd_buffers[rank], rank)
+                    mpi_requests.append(self.comm.Isend(lhs_snd_buffers[rank], rank, self.LHS_GRAD_MPI_TAG))
+                if rhs_snd_counts[rank] > 0:
+                    self._pack_send_grad_buffer(lhs2rhs_iinfo, idata_for_remote_rhs, rhs_snd_buffers[rank], rank)
+                    mpi_requests.append(self.comm.Isend(rhs_snd_buffers[rank], rank, self.RHS_GRAD_MPI_TAG))
+        
+        # Wait on non blocking comms
+        for req in mpi_requests:
+            req.Wait()
+            req.free()
+        
+        # Unpack received data and update PyFR matrices
+        if self.ninters_lhs:
+            self._unpack_recv_grad_buffers(lhs_rcv_buffers, local_lhs_interp, self.lhs_pts_rhs_fidx)
+            self._vect_lhs_interp.set(local_lhs_interp)
+        
+        if self.ninters_rhs:
+            self._unpack_recv_grad_buffers(rhs_rcv_buffers, local_rhs_interp, self.rhs_pts_lhs_fidx)
+            self._vect_rhs_interp.set(local_rhs_interp)
+        
+        self._grad_comm_time += time.time() - tstart
+        if self._t_counter % 1000 == 0:
+            print(f'{self._grad_comm_time}')
+    
+

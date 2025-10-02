@@ -11,7 +11,7 @@
     ortho_basis[1] = rloc;
     for(int i = 2; i < ${str(nftps)}; i++) {
         fpdtype_t aq = 2.0*i*(2.0*i-1.0)/(2.0*i*i);
-        fpdtype_t cq = 2.0*i*(i-1.0)*(i+1.0)/(i*i*(2.0*i-2.0));
+        fpdtype_t cq = 2.0*i*(i-1.0)*(i-1.0)/(i*i*(2.0*i-2.0));
         ortho_basis[i] = aq*rloc*ortho_basis[i-1] - cq*ortho_basis[i-2];
     }
 

@@ -334,19 +334,33 @@ class BaseSystem:
 
         graphs = self._rhs_graphs(uinbank, foutbank)
 
-        # Run first graph
-        self.backend.run_graph(graphs[0])
+        if len(self._sliding_inters):
+            # Run first graph
+            self.backend.run_graph(graphs[0])
 
-        # Do sliding interface interpolation (currently on host but will change)
-        for b in self._sliding_inters:
-            b.interpolate()
+            # Do sliding interface interpolation (currently on host but will change)
+            for b in self._sliding_inters:
+                b.interpolate()
+            
+            # Account for NS grad interpolation (messy but will fix later)
+            if hasattr(self._sliding_inters[0], 'interpolate_grad'):
+                # Run second graph
+                self.backend.run_graph(graphs[1])
 
-        # Run remaining graphs
-        for graph in graphs[1:]:
-            self.backend.run_graph(graph)
-
-        # for graph in self._rhs_graphs(uinbank, foutbank):
-        #     self.backend.run_graph(graph)
+                # Do sliding interface interpolation (currently on host but will change)
+                for b in self._sliding_inters:
+                    b.interpolate_grad()
+                
+                # Run remaining graphs
+                for graph in graphs[2:]:
+                    self.backend.run_graph(graph)
+            else:
+                # Run remaining graphs
+                for graph in graphs[1:]:
+                    self.backend.run_graph(graph)
+        else:
+            for graph in self._rhs_graphs(uinbank, foutbank):
+                self.backend.run_graph(graph)
 
     def _preproc_graphs(self, uinbank):
         pass
@@ -385,8 +399,17 @@ class BaseSystem:
     def compute_grads(self, t, uinbank):
         self._prepare_kernels(t, uinbank, None)
 
-        for graph in self._compute_grads_graph(uinbank):
-            self.backend.run_graph(graph)
+        graphs = self._rhs_graphs(uinbank, foutbank)
+
+        self.backend.run_graph(graphs[0])
+
+        for b in self._sliding_inters:
+            b.interpolate_grad()
+        
+        self.backend.run_graph(graphs[1])
+
+        # for graph in self._compute_grads_graph(uinbank):
+        #     self.backend.run_graph(graph)
 
     def filt(self, uinoutbank):
         kkey = ('eles/modal_filter', uinoutbank, None)

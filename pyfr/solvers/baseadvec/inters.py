@@ -266,8 +266,8 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                 self._entmin_rhs = self._view(self.rhs, 'get_entmin_bc_fpts_for_inter')
 
         # Matrices for interpolation
-        max_ninterfpts = 200
-        mat_size_fidx = (1, max_ninterfpts)
+        self.max_ninterfpts = 200
+        mat_size_fidx = (1, self.max_ninterfpts)
         zero_init = np.full(mat_size_fidx, 0, dtype=self._be.ixdtype)
         self._lhs_fidx = self._be.resizable_matrix(mat_size_fidx, tags=tags,
                                          initval=zero_init, dtype=self._be.ixdtype)
@@ -278,13 +278,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                                          initval=zero_init)
         self._rhs_rloc = self._be.resizable_matrix(mat_size_fidx, tags=tags,
                                          initval=zero_init)
-        mat_size_interp = (len(self.fpts), max_ninterfpts)
+        mat_size_interp = (len(self.fpts), self.max_ninterfpts)
         zero_init = np.full(mat_size_interp, 0.0)
         self._lhs_interp_mats = self._be.resizable_matrix(mat_size_interp, tags=tags,
                                          initval=zero_init)
         self._rhs_interp_mats = self._be.resizable_matrix(mat_size_interp, tags=tags,
                                          initval=zero_init)
-        mat_size_remote_results = (self.nvars, max_ninterfpts)
+        mat_size_remote_results = (self.nvars, self.max_ninterfpts)
         zero_init = np.full(mat_size_remote_results, 0.0)
         self._interp_results_for_remote_lhs = self._be.resizable_matrix(mat_size_remote_results,
                                                 tags=tags, initval=zero_init)
@@ -311,13 +311,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         if self.ninters_rhs:
             self.kernels['interp_fpts_for_remote_lhs'] = lambda: self._be.kernel(
-                'siinterp', tplargs=self._tplargs | dict(lhs=True, ninterfpts=self.ninterfpts_rhs), dims=[max_ninterfpts],
+                'siinterp', tplargs=self._tplargs | dict(lhs=True, ninterfpts=self.ninterfpts_rhs), dims=[self.max_ninterfpts],
                 src=self._scal_rhs_copy, fidx=self._rhs_fidx, mat=self._rhs_interp_mats,
                 dst=self._interp_results_for_remote_lhs
             )
         if self.ninters_lhs:
             self.kernels['interp_fpts_for_remote_rhs'] = lambda: self._be.kernel(
-                'siinterp', tplargs=self._tplargs | dict(lhs=False, ninterfpts=self.ninterfpts_lhs), dims=[max_ninterfpts],
+                'siinterp', tplargs=self._tplargs | dict(lhs=False, ninterfpts=self.ninterfpts_lhs), dims=[self.max_ninterfpts],
                 src=self._scal_lhs_copy, fidx=self._lhs_fidx, mat=self._lhs_interp_mats,
                 dst=self._interp_results_for_remote_rhs
             )
@@ -325,12 +325,12 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._invvdm = self._be.const_matrix(self._face_polybasis.invvdm)
         if self.ninters_rhs:
             self.kernels['calc_mats_for_remote_lhs'] = lambda: self._be.kernel(
-                'sicalcmats', tplargs=self._tplargs, dims=[max_ninterfpts],
+                'sicalcmats', tplargs=self._tplargs, dims=[self.max_ninterfpts],
                 rloc=self._rhs_rloc, out=self._rhs_interp_mats, invvdm=self._invvdm
             )
         if self.ninters_lhs:
             self.kernels['calc_mats_for_remote_rhs'] = lambda: self._be.kernel(
-                'sicalcmats', tplargs=self._tplargs, dims=[max_ninterfpts],
+                'sicalcmats', tplargs=self._tplargs, dims=[self.max_ninterfpts],
                 rloc=self._lhs_rloc, out=self._lhs_interp_mats, invvdm=self._invvdm
             )
         

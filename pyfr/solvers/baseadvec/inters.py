@@ -2,6 +2,7 @@ import itertools as it
 from functools import cached_property
 import math
 import numpy as np
+from scipy.spatial import KDTree
 
 from pyfr.nputil import npeval
 from pyfr.polys import get_polybasis
@@ -229,6 +230,9 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         # Gather the local bounds for each face and also the fpts locations
         self._gather_all_fpts_and_bounds()
+
+        # Create KD-Trees
+        self._construct_global_kd_tree()
 
         # Views, constant matrices and copies of face point data
         tags = {'align'}
@@ -501,23 +505,62 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     def _check_pt_in_line_face(self, pt, fbounds):
         return pt[1] + 1e-10 >= fbounds[0] and pt[1] - 1e-10 <= fbounds[1]
     
+    def _node_idx_in_list(self, _node, _list):
+        for i in range(len(_list)):
+            if abs(_node - _list[i]) < 1e-8:
+                return i
+            # _match = True
+            # for _n1, _n2 in zip(_node, _list[i]):
+            #     if abs(_n1 - _n2) < 1e-8:
+            #         _match = False
+            #         break
+            # if _match:
+            #     return i
+        return -1
+
+    def _construct_global_kd_tree(self):
+        # Construct list of unique nodes and the associated faces for each one
+        nodes, adjacent_faces_lhs = [], []
+        for _rank in range(len(self.global_lhs_bounds)):
+            for _fidx in range(len(self.global_lhs_bounds[_rank])):
+                for _nodeidx in range(len(self.global_lhs_bounds[_rank][_fidx])):
+                    nodeixd = self._node_idx_in_list(self.global_lhs_bounds[_rank][_fidx][_nodeidx], nodes)
+                    if nodeixd < 0:
+                        nodes.append(np.array(self.global_lhs_bounds[_rank][_fidx][_nodeidx]))
+                        adjacent_faces_lhs.append([(_rank, _fidx)])
+                    else:
+                        adjacent_faces_lhs[nodeixd].append((_rank, _fidx))
+        
+        adjacent_faces_rhs = [ [] for _ in range(len(adjacent_faces_lhs)) ]
+        for _rank in range(0, len(self.global_rhs_bounds)):
+            for _fidx in range(0, len(self.global_rhs_bounds[_rank])):
+                for _nodeidx in range(len(self.global_rhs_bounds[_rank][_fidx])):
+                    nodeixd = self._node_idx_in_list(self.global_rhs_bounds[_rank][_fidx][_nodeidx], nodes)
+                    if nodeixd < 0:
+                        raise Exception('New node when constructing RHS data for global KD-Tree')
+                    else:
+                        adjacent_faces_rhs[nodeixd].append((_rank, _fidx))
+
+        # Create the KDTree
+        self.global_kd_tree_nodes = np.array(nodes).reshape(len(nodes), self.ndims - 1)
+        self.global_kd_tree = KDTree(self.global_kd_tree_nodes)
+        self.global_kd_tree_data_lhs = adjacent_faces_lhs
+        self.global_kd_tree_data_rhs = adjacent_faces_rhs
+
     # Brute force search for now
-    def _get_rank_fidx_for_pts(self, pts_plocs, face_bounds):
+    def _get_rank_fidx_for_pts(self, pts_plocs, lhs):
+        _plocs_y = np.array([_y for _x, _y in pts_plocs]).reshape(-1, 1)
+        _, nodeidxs = self.global_kd_tree.query(_plocs_y)
+
         rank_fidx = []
-        for _ploc in pts_plocs:
-            _fidx = -1
-            _rank = -1
-            for r in range(0, len(face_bounds)):
-                for i in range(0, len(face_bounds[r])):
-                    if self._check_pt_in_face(_ploc, face_bounds[r][i]):
-                        _fidx = i
-                        _rank = r
-                        break
-                if _fidx != -1:
+        kd_tree_data = self.global_kd_tree_data_lhs if lhs else self.global_kd_tree_data_rhs
+        face_bounds = self.global_lhs_bounds if lhs else self.global_rhs_bounds
+        for i, nodeidx in enumerate(nodeidxs):
+            for _rank, _fidx in kd_tree_data[nodeidx]:
+                if self._check_pt_in_face(pts_plocs[i], face_bounds[_rank][_fidx]):
+                    rank_fidx.append((_rank, _fidx))
                     break
-            if _fidx == -1:
-                raise Exception(f'A sliding interface point ({_ploc[0]},{_ploc[1]}) is not within any faces')
-            rank_fidx.append((_rank, _fidx))
+        
         return rank_fidx
 
     # Brute force search for now
@@ -560,8 +603,8 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         tstart1 = time.time()
 
         # Work out which rank and face contains each local face point
-        self.lhs_pts_rhs_fidx = self._get_rank_fidx_for_pts(lhs_plocs, rhs_face_bounds)
-        self.rhs_pts_lhs_fidx = self._get_rank_fidx_for_pts(rhs_plocs, lhs_face_bounds)
+        self.lhs_pts_rhs_fidx = self._get_rank_fidx_for_pts(lhs_plocs, False)
+        self.rhs_pts_lhs_fidx = self._get_rank_fidx_for_pts(rhs_plocs, True)
         self._prepare2_time += time.time() - tstart1
         tstart1 = time.time()
 

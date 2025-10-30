@@ -40,14 +40,17 @@ class VTKSpanAvgWriter(BaseVTKWriter):
         quadnupts = (order + 1)**2
         # Swap axis of soln to match ploc
         soln = self.soln['hex'].swapaxes(0, 1).swapaxes(0, 2)
-        # Get new arrays
+
         nvals = soln.shape[2]
-        ploc2d = np.zeros((neles, quadnupts, 2), dtype=self.dtype)
-        soln2d = np.zeros((neles, quadnupts, nvals), dtype=self.dtype)
-        mesh2d = np.zeros((neles, nspts2d, 2), dtype=self.dtype)
         curved = self.mesh.spts_curved['hex']
-        # Iterate over each element and reduce to 2D quad
-        for _ploc, _soln, _mesh, _ploc2d, _soln2d, _mesh2d in zip(ploc, soln, self.mesh.spts['hex'].swapaxes(0, 1), ploc2d, soln2d, mesh2d):
+        _ploc2d = np.zeros((quadnupts, 2), dtype=self.dtype)
+        _soln2d = np.zeros((quadnupts, nvals), dtype=self.dtype)
+        _mesh2d = np.zeros((nspts2d, 2), dtype=self.dtype)
+        elements2d = {}
+        centreAvgDP = 6
+        ploc2dTol = 1e-6
+        # Iterate over each element and reduce to 2D quad, and add to map in order to reduce a stack of quads onto a single quad
+        for _ploc, _soln, _mesh, _curved in zip(ploc, soln, self.mesh.spts['hex'].swapaxes(0, 1), curved):
             # TODO will this always be the case for shape points?
             for i in range(0, nspts2d):
                 _mesh2d[i][0] = _mesh[i][0]
@@ -61,12 +64,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
                         _soln2d[i][v] += _soln[i + j * quadnupts][v] * line.wts[j]
                     # Line weights integrate [-1,1], so need to divide by 2
                     _soln2d[i][v] *= 0.5
-        # Reduce stacks of 2D quads to a single quad
-        # *** This assumes evenly spaced Z dimension layers in the mesh!!! ***
-        elements2d = {}
-        centreAvgDP = 6
-        ploc2dTol = 1e-6
-        for _ploc2d, _soln2d, _mesh2d, _curved in zip(ploc2d, soln2d, mesh2d, curved):
+            
             # Key is average point rounded to 6 decimal places 
             plockey = (np.round(np.sum(_ploc2d[:,0]) / len(_ploc2d), centreAvgDP), np.round(np.sum(_ploc2d[:,1]) / len(_ploc2d), centreAvgDP))
             if plockey in elements2d:
@@ -90,6 +88,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
             else:
                 acc = [_ploc2d, _soln2d, 1, _mesh2d, 1 if _curved else 0]
             elements2d[plockey] = acc
+
         # Build new arrays
         nelem2d = len(elements2d)
         ploc2d = np.zeros((nelem2d, quadnupts, 2), dtype=self.dtype)
@@ -142,12 +141,15 @@ class VTKSpanAvgWriter(BaseVTKWriter):
         soln = self.soln['pri'].swapaxes(0, 1).swapaxes(0, 2)
         # Get new arrays
         nvals = soln.shape[2]
-        ploc2d = np.zeros((neles, trinupts, 2), dtype=self.dtype)
-        soln2d = np.zeros((neles, trinupts, nvals), dtype=self.dtype)
-        mesh2d = np.zeros((neles, nspts2d, 2), dtype=self.dtype)
         curved = self.mesh.spts_curved['pri']
-        # Iterate over each element and reduce to 2D quad
-        for _ploc, _soln, _mesh, _ploc2d, _soln2d, _mesh2d in zip(ploc, soln, self.mesh.spts['pri'].swapaxes(0, 1), ploc2d, soln2d, mesh2d):
+        _ploc2d = np.zeros((trinupts, 2), dtype=self.dtype)
+        _soln2d = np.zeros((trinupts, nvals), dtype=self.dtype)
+        _mesh2d = np.zeros((nspts2d, 2), dtype=self.dtype)
+        elements2d = {}
+        centreAvgDP = 6
+        ploc2dTol = 1e-6
+        # Iterate over each element and reduce to 2D tri, also add to map to reduce a stack of tris to a single tri
+        for _ploc, _soln, _mesh, _curved in zip(ploc, soln, self.mesh.spts['pri'].swapaxes(0, 1), curved):
             # TODO will this always be the case for shape points?
             for i in range(0, nspts2d):
                 _mesh2d[i][0] = _mesh[i][0]
@@ -161,12 +163,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
                         _soln2d[i][v] += _soln[i + j * trinupts][v] * line.wts[j]
                     # Line weights integrate [-1,1], so need to divide by 2
                     _soln2d[i][v] *= 0.5
-        # Reduce stacks of 2D tris to a single tri
-        # *** This assumes evenly spaced Z dimension layers in the mesh!!! ***
-        elements2d = {}
-        centreAvgDP = 6
-        ploc2dTol = 1e-6
-        for _ploc2d, _soln2d, _mesh2d, _curved in zip(ploc2d, soln2d, mesh2d, curved):
+            
             # Key is average point rounded to 6 decimal places 
             plockey = (np.round(np.sum(_ploc2d[:,0]) / len(_ploc2d), centreAvgDP), np.round(np.sum(_ploc2d[:,1]) / len(_ploc2d), centreAvgDP))
             if plockey in elements2d:
@@ -191,6 +188,7 @@ class VTKSpanAvgWriter(BaseVTKWriter):
             else:
                 acc = [_ploc2d, _soln2d, 1, _mesh2d, 1 if _curved else 0]
             elements2d[plockey] = acc
+
         # Build new arrays
         nelem2d = len(elements2d)
         ploc2d = np.zeros((nelem2d, trinupts, 2), dtype=self.dtype)

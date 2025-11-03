@@ -233,6 +233,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         # Create KD-Trees
         self._construct_global_kd_tree()
+        self._construct_local_kd_trees()
 
         # Views, constant matrices and copies of face point data
         tags = {'align'}
@@ -505,6 +506,9 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     def _check_pt_in_line_face(self, pt, fbounds):
         return pt[1] + 1e-10 >= fbounds[0] and pt[1] - 1e-10 <= fbounds[1]
     
+    # def _check_pt_in_rank_line_faces(self, pt):
+    #     return pt[1] + 1e-10 >= self.local_min_y and pt[1] - 1e-10 <= self.local_max_y
+
     def _node_idx_in_list(self, _node, _list):
         for i in range(len(_list)):
             if abs(_node - _list[i]) < 1e-8:
@@ -546,8 +550,40 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.global_kd_tree = KDTree(self.global_kd_tree_nodes)
         self.global_kd_tree_data_lhs = adjacent_faces_lhs
         self.global_kd_tree_data_rhs = adjacent_faces_rhs
+    
+    def _construct_local_kd_trees(self):
+        # Construct list of unique nodes and the associated faces for each one
+        if self.ninters_lhs:
+            nodes_lhs, adjacent_faces_lhs = [], []
+            for _fidx in range(len(self._lhs_face_bounds)):
+                for _nodeidx in range(len(self._lhs_face_bounds[_fidx])):
+                    nodeixd = self._node_idx_in_list(self._lhs_face_bounds[_fidx][_nodeidx], nodes_lhs)
+                    if nodeixd < 0:
+                        nodes_lhs.append(np.array(self._lhs_face_bounds[_fidx][_nodeidx]))
+                        adjacent_faces_lhs.append([_fidx])
+                    else:
+                        adjacent_faces_lhs[nodeixd].append(_fidx)
+            
+            self.local_lhs_kd_tree_nodes = np.array(nodes_lhs).reshape(len(nodes_lhs), self.ndims - 1)
+            self.local_lhs_kd_tree = KDTree(self.local_lhs_kd_tree_nodes)
+            self.local_lhs_kd_tree_data = adjacent_faces_lhs
+        
+        if self.ninters_rhs:
+            nodes_rhs, adjacent_faces_rhs = [], []
+            for _fidx in range(len(self._rhs_face_bounds)):
+                for _nodeidx in range(len(self._rhs_face_bounds[_fidx])):
+                    nodeixd = self._node_idx_in_list(self._rhs_face_bounds[_fidx][_nodeidx], nodes_rhs)
+                    if nodeixd < 0:
+                        nodes_rhs.append(np.array(self._rhs_face_bounds[_fidx][_nodeidx]))
+                        adjacent_faces_rhs.append([_fidx])
+                    else:
+                        adjacent_faces_rhs[nodeixd].append(_fidx)
 
-    # Brute force search for now
+            self.local_rhs_kd_tree_nodes = np.array(nodes_rhs).reshape(len(nodes_rhs), self.ndims - 1)
+            self.local_rhs_kd_tree = KDTree(self.local_rhs_kd_tree_nodes)
+            self.local_rhs_kd_tree_data = adjacent_faces_rhs
+
+    # Now using KDTrees
     def _get_rank_fidx_for_pts(self, pts_plocs, lhs):
         _plocs_y = np.array([_y for _x, _y in pts_plocs]).reshape(-1, 1)
         _, nodeidxs = self.global_kd_tree.query(_plocs_y)
@@ -562,16 +598,38 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                     break
         
         return rank_fidx
+    
+    # Now using KDTrees
+    def _get_fidx_rank_pidx(self, pts_plocs, lhs_faces):
+        if (lhs_faces and not self.ninters_lhs) or (not lhs_faces and not self.ninters_rhs):
+            return []
 
-    # Brute force search for now
-    def _get_fidx_rank_pidx(self, pts_plocs, face_bounds):
-        interp_info = []
+        _plocs_y = []
+        _ranks_pidx = []
         for r in range(0, len(pts_plocs)):
             for pidx in range(0, len(pts_plocs[r])):
-                for fidx in range(0, len(face_bounds)):
-                    if self._check_pt_in_face(pts_plocs[r][pidx], face_bounds[fidx]):
-                        interp_info.append((fidx, r, pidx))
-                        break
+                _plocs_y.append(pts_plocs[r][pidx][1])
+                _ranks_pidx.append((r, pidx))
+        _plocs_y = np.array(_plocs_y).reshape(-1, 1)
+
+        if lhs_faces:
+            _, nodeidxs = self.local_lhs_kd_tree.query(_plocs_y)
+            kd_tree_data = self.local_lhs_kd_tree_data
+            face_bounds = self._lhs_face_bounds
+        else:
+            _, nodeidxs = self.local_rhs_kd_tree.query(_plocs_y)
+            kd_tree_data = self.local_rhs_kd_tree_data
+            face_bounds = self._rhs_face_bounds
+    
+        interp_info = []
+
+        for i, nodeidx in enumerate(nodeidxs):
+            for _fidx in kd_tree_data[nodeidx]:
+                _rank, _pidx = _ranks_pidx[i]
+                if self._check_pt_in_face(pts_plocs[_rank][_pidx], face_bounds[_fidx]):
+                    interp_info.append((_fidx, _rank, _pidx))
+                    break
+
         return interp_info
 
     # Assume y axis aligned line
@@ -610,14 +668,12 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         # Work out which interpolations we'll need to perform before sending to other ranks
         global_lhs_plocs, global_rhs_plocs = self._apply_transform_global(t)
-        self.lhs_interps_for_remote_rhs = self._get_fidx_rank_pidx(global_rhs_plocs, self._lhs_face_bounds)
-        self.rhs_interps_for_remote_lhs = self._get_fidx_rank_pidx(global_lhs_plocs, self._rhs_face_bounds)
+        self.lhs_interps_for_remote_rhs = self._get_fidx_rank_pidx(global_rhs_plocs, True)
+        self.rhs_interps_for_remote_lhs = self._get_fidx_rank_pidx(global_lhs_plocs, False)
         self._prepare3_time += time.time() - tstart1
         tstart1 = time.time()
 
         # Calculate matrix to interpolate to face point
-        # self.lhs_interp_matrices_for_remote_rhs = self._get_interp_mats_for_pts(global_rhs_plocs, self._lhs_face_bounds, self.lhs_interps_for_remote_rhs)
-        # self.rhs_interp_matrices_for_remote_lhs = self._get_interp_mats_for_pts(global_lhs_plocs, self._rhs_face_bounds, self.rhs_interps_for_remote_lhs)
         self.rlocs_remote_rhs = self._get_rloc_for_pts(global_rhs_plocs, self._lhs_face_bounds, self.lhs_interps_for_remote_rhs)
         self.rlocs_remote_lhs = self._get_rloc_for_pts(global_lhs_plocs, self._rhs_face_bounds, self.rhs_interps_for_remote_lhs)
         self._prepare4_time += time.time() - tstart1

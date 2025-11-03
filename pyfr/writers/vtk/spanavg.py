@@ -43,14 +43,14 @@ class VTKSpanAvgWriter(BaseVTKWriter):
 
         nvals = soln.shape[2]
         curved = self.mesh.spts_curved['hex']
-        _ploc2d = np.zeros((quadnupts, 2), dtype=self.dtype)
-        _soln2d = np.zeros((quadnupts, nvals), dtype=self.dtype)
-        _mesh2d = np.zeros((nspts2d, 2), dtype=self.dtype)
         elements2d = {}
         centreAvgDP = 6
         ploc2dTol = 1e-6
         # Iterate over each element and reduce to 2D quad, and add to map in order to reduce a stack of quads onto a single quad
         for _ploc, _soln, _mesh, _curved in zip(ploc, soln, self.mesh.spts['hex'].swapaxes(0, 1), curved):
+            _ploc2d = np.zeros((quadnupts, 2), dtype=self.dtype)
+            _soln2d = np.zeros((quadnupts, nvals), dtype=self.dtype)
+            _mesh2d = np.zeros((nspts2d, 2), dtype=self.dtype)
             # TODO will this always be the case for shape points?
             for i in range(0, nspts2d):
                 _mesh2d[i][0] = _mesh[i][0]
@@ -142,14 +142,14 @@ class VTKSpanAvgWriter(BaseVTKWriter):
         # Get new arrays
         nvals = soln.shape[2]
         curved = self.mesh.spts_curved['pri']
-        _ploc2d = np.zeros((trinupts, 2), dtype=self.dtype)
-        _soln2d = np.zeros((trinupts, nvals), dtype=self.dtype)
-        _mesh2d = np.zeros((nspts2d, 2), dtype=self.dtype)
         elements2d = {}
         centreAvgDP = 6
         ploc2dTol = 1e-6
         # Iterate over each element and reduce to 2D tri, also add to map to reduce a stack of tris to a single tri
         for _ploc, _soln, _mesh, _curved in zip(ploc, soln, self.mesh.spts['pri'].swapaxes(0, 1), curved):
+            _ploc2d = np.zeros((trinupts, 2), dtype=self.dtype)
+            _soln2d = np.zeros((trinupts, nvals), dtype=self.dtype)
+            _mesh2d = np.zeros((nspts2d, 2), dtype=self.dtype)
             # TODO will this always be the case for shape points?
             for i in range(0, nspts2d):
                 _mesh2d[i][0] = _mesh[i][0]

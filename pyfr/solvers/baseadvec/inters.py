@@ -210,6 +210,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         # Set functions for straight line interface
         self._check_pt_in_face = self._check_pt_in_line_face
+        self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_line
         self.etype = lhs[0][0]
         linepts = cfg.get('solver-interfaces-line', 'flux-pts')
         self.fpts = get_quadrule('line', linepts, qdeg=self.order+2).pts
@@ -392,6 +393,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._lhs_plocs = np.reshape(self._lhs_plocs, (-1, 2))
         self._rhs_plocs = np.reshape(self._rhs_plocs, (-1, 2))
 
+        if len(self._lhs_face_bounds) > 0:
+            self.local_min_y_lhs = np.min(self._lhs_face_bounds)
+            self.local_max_y_lhs = np.max(self._lhs_face_bounds)
+        if len(self._rhs_face_bounds) > 0:
+            self.local_min_y_rhs = np.min(self._rhs_face_bounds)
+            self.local_max_y_rhs = np.max(self._rhs_face_bounds)
+
     def _gather_all_fpts_and_bounds(self):
         # Get number of LHS and RHS elements on each rank with allgather
         self.global_lhs_counts = np.empty(self.comm.size, dtype=self._be.ixdtype)
@@ -449,8 +457,8 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         dist_v_l = (self.vl - self.vr) * t
         dist_u_r = 0.0 # (self.ur - self.ul) * t
         dist_v_r = (self.vr - self.vl) * t
-        t_ploc_lhs = np.array([[_u + dist_u_l, _v + dist_v_l] for _u, _v in self._lhs_plocs])
-        t_ploc_rhs = np.array([[_u + dist_u_r, _v + dist_v_r] for _u, _v in self._rhs_plocs])
+        t_ploc_lhs = self._lhs_plocs + np.array([dist_u_l, dist_v_l])
+        t_ploc_rhs = self._rhs_plocs + np.array([dist_u_r, dist_v_r])
 
         # Mod each ploc point to match the otherside's face bounds
         lhs_len = self.global_lhs_max_bound - self.global_lhs_min_bound
@@ -458,13 +466,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         for _ploc in t_ploc_lhs:
             if _ploc[1] < self.global_rhs_min_bound:
                 _ploc[1] += np.floor((self.global_rhs_max_bound - _ploc[1]) / rhs_len) * rhs_len
-            if _ploc[1] > self.global_rhs_max_bound:
+            elif _ploc[1] > self.global_rhs_max_bound:
                 _ploc[1] -= np.floor((_ploc[1] - self.global_rhs_min_bound) / rhs_len) * rhs_len
         
         for _ploc in t_ploc_rhs:
             if _ploc[1] < self.global_lhs_min_bound:
                 _ploc[1] += np.floor((self.global_lhs_max_bound - _ploc[1]) / lhs_len) * lhs_len
-            if _ploc[1] > self.global_lhs_max_bound:
+            elif _ploc[1] > self.global_lhs_max_bound:
                 _ploc[1] -= np.floor((_ploc[1] - self.global_lhs_min_bound) / lhs_len) * lhs_len
         
         return t_ploc_lhs, t_ploc_rhs
@@ -478,11 +486,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         dist_u_r = 0.0 # (self.ur - self.ul) * t
         dist_v_r = (self.vr - self.vl) * t
         t_ploc_lhs = []
+        dist_l = np.array([dist_u_l, dist_v_l])
+        dist_r = np.array([dist_u_r, dist_v_r])
         for rank_ploc in self.global_lhs_plocs:
-            t_ploc_lhs.append(np.array([[_u + dist_u_l, _v + dist_v_l] for _u, _v in rank_ploc]))
+            t_ploc_lhs.append(rank_ploc + dist_l)
         t_ploc_rhs = []
         for rank_ploc in self.global_rhs_plocs:
-            t_ploc_rhs.append(np.array([[_u + dist_u_r, _v + dist_v_r] for _u, _v in rank_ploc]))
+            t_ploc_rhs.append(rank_ploc + dist_r)
 
         # Mod each ploc point to match the otherside's face bounds
         lhs_len = self.global_lhs_max_bound - self.global_lhs_min_bound
@@ -491,14 +501,14 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
             for _ploc in rank_ploc:
                 if _ploc[1] < self.global_rhs_min_bound:
                     _ploc[1] += np.floor((self.global_rhs_max_bound - _ploc[1]) / rhs_len) * rhs_len
-                if _ploc[1] > self.global_rhs_max_bound:
+                elif _ploc[1] > self.global_rhs_max_bound:
                     _ploc[1] -= np.floor((_ploc[1] - self.global_rhs_min_bound) / rhs_len) * rhs_len
         
         for rank_ploc in t_ploc_rhs:
             for _ploc in rank_ploc:
                 if _ploc[1] < self.global_lhs_min_bound:
                     _ploc[1] += np.floor((self.global_lhs_max_bound - _ploc[1]) / lhs_len) * lhs_len
-                if _ploc[1] > self.global_lhs_max_bound:
+                elif _ploc[1] > self.global_lhs_max_bound:
                     _ploc[1] -= np.floor((_ploc[1] - self.global_lhs_min_bound) / lhs_len) * lhs_len
         
         return t_ploc_lhs, t_ploc_rhs
@@ -506,8 +516,11 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     def _check_pt_in_line_face(self, pt, fbounds):
         return pt[1] + 1e-10 >= fbounds[0] and pt[1] - 1e-10 <= fbounds[1]
     
-    # def _check_pt_in_rank_line_faces(self, pt):
-    #     return pt[1] + 1e-10 >= self.local_min_y and pt[1] - 1e-10 <= self.local_max_y
+    def _check_pt_in_rank_bounding_box_line(self, pt, lhs):
+        if lhs:
+            return pt[1] + 1e-10 >= self.local_min_y_lhs and pt[1] - 1e-10 <= self.local_max_y_lhs
+        else:
+            return pt[1] + 1e-10 >= self.local_min_y_rhs and pt[1] - 1e-10 <= self.local_max_y_rhs
 
     def _node_idx_in_list(self, _node, _list):
         for i in range(len(_list)):
@@ -608,8 +621,9 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         _ranks_pidx = []
         for r in range(0, len(pts_plocs)):
             for pidx in range(0, len(pts_plocs[r])):
-                _plocs_y.append(pts_plocs[r][pidx][1])
-                _ranks_pidx.append((r, pidx))
+                if self._check_pt_in_rank_bounding_box(pts_plocs[r][pidx], lhs_faces):
+                    _plocs_y.append(pts_plocs[r][pidx][1])
+                    _ranks_pidx.append((r, pidx))
         _plocs_y = np.array(_plocs_y).reshape(-1, 1)
 
         if lhs_faces:
@@ -694,8 +708,6 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._lhs_fidx.set(np.reshape(lhs_fidx, (-1, 1)).swapaxes(0,1))
         rhs_fidx = np.array([[fidx for fidx, _, _ in self.rhs_interps_for_remote_lhs]])
         self._rhs_fidx.set(np.reshape(rhs_fidx, (-1, 1)).swapaxes(0,1))
-        # self._lhs_interp_mats.set(np.reshape(self.lhs_interp_matrices_for_remote_rhs, (-1, len(self.fpts))).swapaxes(0,1))
-        # self._rhs_interp_mats.set(np.reshape(self.rhs_interp_matrices_for_remote_lhs, (-1, len(self.fpts))).swapaxes(0,1))
         self._lhs_rloc.set(np.reshape(self.rlocs_remote_rhs, (-1, 1)).swapaxes(0,1))
         self._rhs_rloc.set(np.reshape(self.rlocs_remote_lhs, (-1, 1)).swapaxes(0,1))
 

@@ -72,6 +72,7 @@ class CUDABackend(BaseBackend):
         self.view_cls = types.CUDAView
         self.xchg_matrix_cls = types.CUDAXchgMatrix
         self.xchg_view_cls = types.CUDAXchgView
+        self.resiable_matrix_cls = types.CUDAResizableMatrix
         self.ordered_meta_kernel_cls = provider.CUDAOrderedMetaKernel
         self.unordered_meta_kernel_cls = provider.CUDAUnorderedMetaKernel
 

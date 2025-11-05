@@ -59,7 +59,7 @@ class CUDAResizableMatrix(CUDAMatrix, base.ResizableMatrix):
         buf = np.empty((self.data_nrow, self.data_leaddim), dtype=self.dtype)
 
         # Copy
-        self.backend.cuda.memcpy(buf, self.data, self.nbytes)
+        self.backend.cuda.memcpy(buf, self.data, self.data_nbytes)
 
         # Unpack
         return self._unpack(buf)

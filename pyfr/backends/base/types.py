@@ -221,7 +221,7 @@ class ResizableMatrix(Matrix):
                          tags)
         
         self.resizecount = 0
-        self.data_nrow, self.data_leaddim = self.nrow, self.leaddim
+        self.data_nrow, self.data_leaddim, self.data_nbytes = self.nrow, self.leaddim, self.nbytes
     
     # TODO check if extent ever used for this, 
     # and if so I think this workflow won't work

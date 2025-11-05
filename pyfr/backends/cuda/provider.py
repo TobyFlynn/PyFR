@@ -16,8 +16,7 @@ class CUDAKernel(Kernel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        if hasattr(self, 'bind') and hasattr(self, 'add_to_graph'):
-            self.gnodes = WeakKeyDictionary()
+        self.gnodes = WeakKeyDictionary()
 
 
 class CUDAOrderedMetaKernel(BaseOrderedMetaKernel):
@@ -97,8 +96,8 @@ class CUDAPointwiseKernelProvider(CUDAKernelProvider,
                 for i, d in enumerate(_dims):
                     params.set_arg(i, d)
                 # Notify any graphs we're in about our new parameters
-                    for graph, gnode in self.gnodes.items():
-                        graph.stale_kparams[gnode] = params
+                for graph, gnode in self.gnodes.items():
+                    graph.stale_kparams[gnode] = params
 
             if rtargs:
                 def bind(self, **kwargs):
@@ -113,10 +112,9 @@ class CUDAPointwiseKernelProvider(CUDAKernelProvider,
             def add_to_graph(self, graph, deps):
                 gnode = graph.graph.add_kernel(params, deps)
 
-                # If our parameters can change then we need to keep a
-                # (weak) reference to the graph so we can notify it
-                if rtargs:
-                    self.gnodes[graph] = gnode
+                # Keep a (weak) reference to the graph so we can notify it if 
+                # our parameters can change
+                self.gnodes[graph] = gnode
 
                 return gnode
 

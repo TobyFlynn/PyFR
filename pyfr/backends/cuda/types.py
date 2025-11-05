@@ -53,6 +53,10 @@ class CUDAView(base.View): pass
 class CUDAXchgView(base.XchgView): pass
 
 
+class CUDAResizableMatrix(CUDAMatrix, base.ResizableMatrix):
+    pass
+
+
 class CUDAXchgMatrix(CUDAMatrix, base.XchgMatrix):
     def __init__(self, backend, dtype, ioshape, initval, extent, aliases,
                  tags):

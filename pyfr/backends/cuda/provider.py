@@ -96,6 +96,9 @@ class CUDAPointwiseKernelProvider(CUDAKernelProvider,
                     raise Exception('Trying to update dims with a different dimension to original declaration')
                 for i, d in enumerate(_dims):
                     params.set_arg(i, d)
+                # Notify any graphs we're in about our new parameters
+                    for graph, gnode in self.gnodes.items():
+                        graph.stale_kparams[gnode] = params
 
             if rtargs:
                 def bind(self, **kwargs):

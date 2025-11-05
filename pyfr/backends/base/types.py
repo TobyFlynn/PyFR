@@ -221,6 +221,7 @@ class ResizableMatrix(Matrix):
                          tags)
         
         self.resizecount = 0
+        self.data_nrow, self.data_leaddim = self.nrow, self.leaddim
     
     # TODO check if extent ever used for this, 
     # and if so I think this workflow won't work
@@ -278,6 +279,7 @@ class ResizableMatrix(Matrix):
             self._free_data()
             self._realloc()
             self.datashape = datashape
+            self.data_nrow, self.data_leaddim = self.nrow, self.leaddim
 
         # Increment resize counter so kernels know to update themselves
         self.resizecount += 1

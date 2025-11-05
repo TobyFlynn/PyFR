@@ -54,7 +54,15 @@ class CUDAXchgView(base.XchgView): pass
 
 
 class CUDAResizableMatrix(CUDAMatrix, base.ResizableMatrix):
-    pass
+    def _get(self):
+        # Allocate an empty buffer
+        buf = np.empty((self.data_nrow, self.data_leaddim), dtype=self.dtype)
+
+        # Copy
+        self.backend.cuda.memcpy(buf, self.data, self.nbytes)
+
+        # Unpack
+        return self._unpack(buf)
 
 
 class CUDAXchgMatrix(CUDAMatrix, base.XchgMatrix):

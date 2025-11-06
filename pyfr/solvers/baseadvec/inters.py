@@ -694,14 +694,16 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         tstart1 = time.time()
 
         # Update sizes of backend matrices
-        self._lhs_fidx.resize((1, len(self.lhs_interps_for_remote_rhs)))
-        self._rhs_fidx.resize((1, len(self.rhs_interps_for_remote_lhs)))
-        self._lhs_rloc.resize((1, len(self.lhs_interps_for_remote_rhs)))
-        self._rhs_rloc.resize((1, len(self.rhs_interps_for_remote_lhs)))
-        self._lhs_interp_mats.resize((len(self.fpts), len(self.lhs_interps_for_remote_rhs)))
-        self._rhs_interp_mats.resize((len(self.fpts), len(self.rhs_interps_for_remote_lhs)))
-        self._interp_results_for_remote_lhs.resize((self.nvars, len(self.rhs_interps_for_remote_lhs)))
-        self._interp_results_for_remote_rhs.resize((self.nvars, len(self.lhs_interps_for_remote_rhs)))
+        if len(self.lhs_interps_for_remote_rhs) != 0:
+            self._lhs_fidx.resize((1, len(self.lhs_interps_for_remote_rhs)))
+            self._lhs_rloc.resize((1, len(self.lhs_interps_for_remote_rhs)))
+            self._lhs_interp_mats.resize((len(self.fpts), len(self.lhs_interps_for_remote_rhs)))
+            self._interp_results_for_remote_rhs.resize((self.nvars, len(self.lhs_interps_for_remote_rhs)))
+        if len(self.rhs_interps_for_remote_lhs) != 0:
+            self._rhs_fidx.resize((1, len(self.rhs_interps_for_remote_lhs)))
+            self._rhs_rloc.resize((1, len(self.rhs_interps_for_remote_lhs)))
+            self._rhs_interp_mats.resize((len(self.fpts), len(self.rhs_interps_for_remote_lhs)))
+            self._interp_results_for_remote_lhs.resize((self.nvars, len(self.rhs_interps_for_remote_lhs)))
 
         # Set backend matrices
         lhs_fidx = np.array([[fidx for fidx, _, _ in self.lhs_interps_for_remote_rhs]])

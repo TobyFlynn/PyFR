@@ -221,8 +221,10 @@ class BaseAdvectionDiffusionSlidingInters(BaseAdvectionSlidingInters):
         super().prepare_interpolation(t, kerns)
 
         # Update sizes of backend matrices
-        self._interp_results_grad_for_remote_lhs.resize((self.ndims, self.nvars, max(len(self.rhs_interps_for_remote_lhs),1)))
-        self._interp_results_grad_for_remote_rhs.resize((self.ndims, self.nvars, max(len(self.lhs_interps_for_remote_rhs),1)))
+        if len(self.rhs_interps_for_remote_lhs) != 0:
+            self._interp_results_grad_for_remote_lhs.resize((self.ndims, self.nvars, max(len(self.rhs_interps_for_remote_lhs),1)))
+        if len(self.lhs_interps_for_remote_rhs) != 0:
+            self._interp_results_grad_for_remote_rhs.resize((self.ndims, self.nvars, max(len(self.lhs_interps_for_remote_rhs),1)))
 
         # Update dims of interpolation kernels
         if self.ninters_rhs:

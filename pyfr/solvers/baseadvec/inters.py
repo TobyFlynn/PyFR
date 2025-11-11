@@ -693,25 +693,23 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._prepare4_time += time.time() - tstart1
         tstart1 = time.time()
 
-        # Update sizes of backend matrices
+        # Update sizes of backend matrices and set them to the correct values
         if len(self.lhs_interps_for_remote_rhs) != 0:
             self._lhs_fidx.resize((1, len(self.lhs_interps_for_remote_rhs)))
             self._lhs_rloc.resize((1, len(self.lhs_interps_for_remote_rhs)))
             self._lhs_interp_mats.resize((len(self.fpts), len(self.lhs_interps_for_remote_rhs)))
             self._interp_results_for_remote_rhs.resize((self.nvars, len(self.lhs_interps_for_remote_rhs)))
+            lhs_fidx = np.array([[fidx for fidx, _, _ in self.lhs_interps_for_remote_rhs]])
+            self._lhs_fidx.set(np.reshape(lhs_fidx, (-1, 1)).swapaxes(0,1))
+            self._lhs_rloc.set(np.reshape(self.rlocs_remote_rhs, (-1, 1)).swapaxes(0,1))
         if len(self.rhs_interps_for_remote_lhs) != 0:
             self._rhs_fidx.resize((1, len(self.rhs_interps_for_remote_lhs)))
             self._rhs_rloc.resize((1, len(self.rhs_interps_for_remote_lhs)))
             self._rhs_interp_mats.resize((len(self.fpts), len(self.rhs_interps_for_remote_lhs)))
             self._interp_results_for_remote_lhs.resize((self.nvars, len(self.rhs_interps_for_remote_lhs)))
-
-        # Set backend matrices
-        lhs_fidx = np.array([[fidx for fidx, _, _ in self.lhs_interps_for_remote_rhs]])
-        self._lhs_fidx.set(np.reshape(lhs_fidx, (-1, 1)).swapaxes(0,1))
-        rhs_fidx = np.array([[fidx for fidx, _, _ in self.rhs_interps_for_remote_lhs]])
-        self._rhs_fidx.set(np.reshape(rhs_fidx, (-1, 1)).swapaxes(0,1))
-        self._lhs_rloc.set(np.reshape(self.rlocs_remote_rhs, (-1, 1)).swapaxes(0,1))
-        self._rhs_rloc.set(np.reshape(self.rlocs_remote_lhs, (-1, 1)).swapaxes(0,1))
+            rhs_fidx = np.array([[fidx for fidx, _, _ in self.rhs_interps_for_remote_lhs]])
+            self._rhs_fidx.set(np.reshape(rhs_fidx, (-1, 1)).swapaxes(0,1))
+            self._rhs_rloc.set(np.reshape(self.rlocs_remote_lhs, (-1, 1)).swapaxes(0,1))
 
         # Update dims of interpolation kernels
         if self.ninters_rhs:

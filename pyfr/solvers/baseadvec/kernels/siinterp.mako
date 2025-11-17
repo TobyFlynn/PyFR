@@ -27,7 +27,7 @@
     fpdtype_t new_v = _v + ${vel_l[1] - vel_r[1]};
 % endif
 % if ndims == 3:
-    pdtype_t _w = dst[3] / dst[0];
+    fpdtype_t _w = dst[3] / dst[0];
 % if lhs:
     fpdtype_t new_w = _w + ${vel_r[2] - vel_l[2]};
 % else:

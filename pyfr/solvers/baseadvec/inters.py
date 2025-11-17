@@ -207,13 +207,22 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.vl = cfg.getfloat(cfgsect, 'vl')
         self.ur = cfg.getfloat(cfgsect, 'ur')
         self.vr = cfg.getfloat(cfgsect, 'vr')
+        if self.ndims == 3:
+            self.wl = cfg.getfloat(cfgsect, 'wl')
+            self.wr = cfg.getfloat(cfgsect, 'wr')
 
         # Set functions for straight line interface
-        self._check_pt_in_face = self._check_pt_in_line_face
-        self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_line
         self.etype = lhs[0][0]
-        linepts = cfg.get('solver-interfaces-line', 'flux-pts')
-        self.fpts = get_quadrule('line', linepts, qdeg=self.order+2).pts
+        if self.ndims == 2:
+            self._check_pt_in_face = self._check_pt_in_line_face
+            self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_line
+            linepts = cfg.get('solver-interfaces-line', 'flux-pts')
+            self.fpts = get_quadrule('line', linepts, qdeg=self.order+2).pts
+        else:
+            self._check_pt_in_face = self._check_pt_in_poly_face
+            self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_square
+            linepts = cfg.get('solver-interfaces-quad', 'flux-pts')
+            self.fpts = get_quadrule('quad', linepts, qdeg=self.order+2).pts
 
         # Split into lhs and rhs of the sliding interface
         self.lhs, self.rhs = self._split_lhs_rhs(elemap, lhs)
@@ -272,17 +281,21 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                 self._entmin_rhs = self._view(self.rhs, 'get_entmin_bc_fpts_for_inter')
 
         # Matrices for interpolation
-        self.max_ninterfpts = 200
+        if self.ndims == 2:
+            self.max_ninterfpts = 1000
+        else:
+            self.max_ninterfpts = 10000
         mat_size_fidx = (1, self.max_ninterfpts)
         zero_init = np.full(mat_size_fidx, 0, dtype=self._be.ixdtype)
         self._lhs_fidx = self._be.resizable_matrix(mat_size_fidx, tags=tags,
                                          initval=zero_init, dtype=self._be.ixdtype)
         self._rhs_fidx = self._be.resizable_matrix(mat_size_fidx, tags=tags,
                                          initval=zero_init, dtype=self._be.ixdtype)
-        zero_init = np.full(mat_size_fidx, 0.0)
-        self._lhs_rloc = self._be.resizable_matrix(mat_size_fidx, tags=tags,
+        mat_size_rloc = (self.ndims - 1, self.max_ninterfpts)
+        zero_init = np.full(mat_size_rloc, 0.0)
+        self._lhs_rloc = self._be.resizable_matrix(mat_size_rloc, tags=tags,
                                          initval=zero_init)
-        self._rhs_rloc = self._be.resizable_matrix(mat_size_fidx, tags=tags,
+        self._rhs_rloc = self._be.resizable_matrix(mat_size_rloc, tags=tags,
                                          initval=zero_init)
         mat_size_interp = (len(self.fpts), self.max_ninterfpts)
         zero_init = np.full(mat_size_interp, 0.0)
@@ -302,7 +315,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.siinterp')
         self._be.pointwise.register('pyfr.solvers.baseadvec.kernels.sicalcmats')
 
-        tplargs = dict(nvars=self.nvars)
+        tplargs = dict(nvars=self.nvars, ndims=self.ndims)
 
         if self.ninters_lhs:
             self.kernels['copy_fpts_lhs'] = lambda: self._be.kernel(
@@ -328,15 +341,16 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
                 dst=self._interp_results_for_remote_rhs
             )
         
+        self._intorder = self.order + 1
         self._invvdm = self._be.const_matrix(self._face_polybasis.invvdm)
         if self.ninters_rhs:
             self.kernels['calc_mats_for_remote_lhs'] = lambda: self._be.kernel(
-                'sicalcmats', tplargs=self._tplargs, dims=[self.max_ninterfpts],
+                'sicalcmats', tplargs=self._tplargs | dict(order=self._intorder), dims=[self.max_ninterfpts],
                 rloc=self._rhs_rloc, out=self._rhs_interp_mats, invvdm=self._invvdm
             )
         if self.ninters_lhs:
             self.kernels['calc_mats_for_remote_rhs'] = lambda: self._be.kernel(
-                'sicalcmats', tplargs=self._tplargs, dims=[self.max_ninterfpts],
+                'sicalcmats', tplargs=self._tplargs | dict(order=self._intorder), dims=[self.max_ninterfpts],
                 rloc=self._lhs_rloc, out=self._lhs_interp_mats, invvdm=self._invvdm
             )
         
@@ -372,33 +386,53 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     @cached_property
     def _face_polybasis(self):
-        return get_polybasis('line', self.order + 1, self.fpts)
+        if self.ndims == 2:
+            return get_polybasis('line', self.order + 1, self.fpts)
+        else:
+            return get_polybasis('quad', self.order + 1, self.fpts)
+
+    @cached_property
+    def _face_vertices(self):
+        if self.ndims == 2:
+            return [-1.0, 1.0]
+        else:
+            return [(-1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (1.0, -1.0)]
 
     def _set_original_fpts_and_bounds(self, lhs, rhs):
         self._lhs_plocs = _get_inter_objs(lhs, 'get_plocs_for_inter', self.elemap) if self.ninters_lhs else []
         self._rhs_plocs = _get_inter_objs(rhs, 'get_plocs_for_inter', self.elemap) if self.ninters_rhs else []
 
-        op = self._face_polybasis.nodal_basis_at([-1.0, 1.0])
+        op = self._face_polybasis.nodal_basis_at(self._face_vertices)
 
         self._lhs_face_bounds = []
         for _plocs in self._lhs_plocs:
-            _y = [_pt[1] for _pt in _plocs]
+            _y = [_pt[1:] for _pt in _plocs]
             self._lhs_face_bounds.append(op @ _y)
         
         self._rhs_face_bounds = []
         for _plocs in self._rhs_plocs:
-            _y = [_pt[1] for _pt in _plocs]
+            _y = [_pt[1:] for _pt in _plocs]
             self._rhs_face_bounds.append(op @ _y)
         
-        self._lhs_plocs = np.reshape(self._lhs_plocs, (-1, 2))
-        self._rhs_plocs = np.reshape(self._rhs_plocs, (-1, 2))
+        self._lhs_plocs = np.reshape(self._lhs_plocs, (-1, self.ndims))
+        self._rhs_plocs = np.reshape(self._rhs_plocs, (-1, self.ndims))
+        self._lhs_face_bounds = np.array(self._lhs_face_bounds)
+        self._rhs_face_bounds = np.array(self._rhs_face_bounds)
+        print(np.shape(self._lhs_face_bounds))
 
         if len(self._lhs_face_bounds) > 0:
-            self.local_min_y_lhs = np.min(self._lhs_face_bounds)
-            self.local_max_y_lhs = np.max(self._lhs_face_bounds)
+            self.local_min_y_lhs = np.min(self._lhs_face_bounds[:,:,0])
+            self.local_max_y_lhs = np.max(self._lhs_face_bounds[:,:,0])
         if len(self._rhs_face_bounds) > 0:
-            self.local_min_y_rhs = np.min(self._rhs_face_bounds)
-            self.local_max_y_rhs = np.max(self._rhs_face_bounds)
+            self.local_min_y_rhs = np.min(self._rhs_face_bounds[:,:,0])
+            self.local_max_y_rhs = np.max(self._rhs_face_bounds[:,:,0])
+        if self.ndims == 3:
+            if len(self._lhs_face_bounds) > 0:
+                self.local_min_z_lhs = np.min(self._lhs_face_bounds[:,:,1])
+                self.local_max_z_lhs = np.max(self._lhs_face_bounds[:,:,1])
+            if len(self._rhs_face_bounds) > 0:
+                self.local_min_z_rhs = np.min(self._rhs_face_bounds[:,:,1])
+                self.local_max_z_rhs = np.max(self._rhs_face_bounds[:,:,1])
 
     def _gather_all_fpts_and_bounds(self):
         # Get number of LHS and RHS elements on each rank with allgather
@@ -408,46 +442,47 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.comm.Allgather(np.array([self.ninters_rhs], dtype=self._be.ixdtype), self.global_rhs_counts)
 
         # Do allgatherv for LHS face bounds
+        num_fp_per_inter = len(self._face_vertices) * (self.ndims - 1)
         lhs_sndbuf = np.array(self._lhs_face_bounds, dtype=self._be.fpdtype).flatten()
-        lhs_rcvbuf = np.zeros((np.sum(self.global_lhs_counts)*2), dtype=self._be.fpdtype)
-        lhs_disp = np.array([np.sum(self.global_lhs_counts[:i])*2 for i in range(0, len(self.global_lhs_counts))], dtype=self._be.ixdtype)
-        self.comm.Allgatherv(lhs_sndbuf, [lhs_rcvbuf, (self.global_lhs_counts*2, lhs_disp)])
+        lhs_rcvbuf = np.zeros((np.sum(self.global_lhs_counts)*num_fp_per_inter), dtype=self._be.fpdtype)
+        lhs_disp = np.array([np.sum(self.global_lhs_counts[:i])*num_fp_per_inter for i in range(0, len(self.global_lhs_counts))], dtype=self._be.ixdtype)
+        self.comm.Allgatherv(lhs_sndbuf, [lhs_rcvbuf, (self.global_lhs_counts*num_fp_per_inter, lhs_disp)])
         self.global_lhs_bounds = []
         for disp, count in zip(lhs_disp, self.global_lhs_counts):
-            self.global_lhs_bounds.append(np.reshape(lhs_rcvbuf[disp:disp+count*2], (-1, 2)))
+            self.global_lhs_bounds.append(np.reshape(lhs_rcvbuf[disp:disp+count*num_fp_per_inter], (-1, len(self._face_vertices), self.ndims - 1)))
 
         # Do allgatherv for RHS face bounds
         rhs_sndbuf = np.array(self._rhs_face_bounds, dtype=self._be.fpdtype).flatten()
-        rhs_rcvbuf = np.zeros((np.sum(self.global_rhs_counts)*2), dtype=self._be.fpdtype)
-        rhs_disp = np.array([np.sum(self.global_rhs_counts[:i])*2 for i in range(0, len(self.global_rhs_counts))], dtype=self._be.ixdtype)
-        self.comm.Allgatherv(rhs_sndbuf, [rhs_rcvbuf, (self.global_rhs_counts*2, rhs_disp)])
+        rhs_rcvbuf = np.zeros((np.sum(self.global_rhs_counts)*num_fp_per_inter), dtype=self._be.fpdtype)
+        rhs_disp = np.array([np.sum(self.global_rhs_counts[:i])*num_fp_per_inter for i in range(0, len(self.global_rhs_counts))], dtype=self._be.ixdtype)
+        self.comm.Allgatherv(rhs_sndbuf, [rhs_rcvbuf, (self.global_rhs_counts*num_fp_per_inter, rhs_disp)])
         self.global_rhs_bounds = []
         for disp, count in zip(rhs_disp, self.global_rhs_counts):
-            self.global_rhs_bounds.append(np.reshape(rhs_rcvbuf[disp:disp+count*2], (-1, 2)))
+            self.global_rhs_bounds.append(np.reshape(rhs_rcvbuf[disp:disp+count*num_fp_per_inter], (-1, len(self._face_vertices), self.ndims - 1)))
         
         # Do allgatherv for LHS face pts
         lhs_sndbuf = np.array(self._lhs_plocs, dtype=self._be.fpdtype).flatten()
-        lhs_rcvbuf = np.zeros((np.sum(self.global_lhs_counts)*2*len(self.fpts)), dtype=self._be.fpdtype)
-        lhs_disp = np.array([np.sum(self.global_lhs_counts[:i])*2*len(self.fpts) for i in range(0, len(self.global_lhs_counts))], dtype=self._be.ixdtype)
-        self.comm.Allgatherv(lhs_sndbuf, [lhs_rcvbuf, (self.global_lhs_counts*2*len(self.fpts), lhs_disp)])
+        lhs_rcvbuf = np.zeros((np.sum(self.global_lhs_counts)*self.ndims*len(self.fpts)), dtype=self._be.fpdtype)
+        lhs_disp = np.array([np.sum(self.global_lhs_counts[:i])*self.ndims*len(self.fpts) for i in range(0, len(self.global_lhs_counts))], dtype=self._be.ixdtype)
+        self.comm.Allgatherv(lhs_sndbuf, [lhs_rcvbuf, (self.global_lhs_counts*self.ndims*len(self.fpts), lhs_disp)])
         self.global_lhs_plocs = []
         for disp, count in zip(lhs_disp, self.global_lhs_counts):
-            self.global_lhs_plocs.append(np.reshape(lhs_rcvbuf[disp:disp+count*2*len(self.fpts)], (-1, 2)))
+            self.global_lhs_plocs.append(np.reshape(lhs_rcvbuf[disp:disp+count*self.ndims*len(self.fpts)], (-1, self.ndims)))
 
         # Do allgatherv for RHS pts
         rhs_sndbuf = np.array(self._rhs_plocs, dtype=self._be.fpdtype).flatten()
-        rhs_rcvbuf = np.zeros((np.sum(self.global_rhs_counts)*2*len(self.fpts)), dtype=self._be.fpdtype)
-        rhs_disp = np.array([np.sum(self.global_rhs_counts[:i])*2*len(self.fpts) for i in range(0, len(self.global_rhs_counts))], dtype=self._be.ixdtype)
-        self.comm.Allgatherv(rhs_sndbuf, [rhs_rcvbuf, (self.global_rhs_counts*2*len(self.fpts), rhs_disp)])
+        rhs_rcvbuf = np.zeros((np.sum(self.global_rhs_counts)*self.ndims*len(self.fpts)), dtype=self._be.fpdtype)
+        rhs_disp = np.array([np.sum(self.global_rhs_counts[:i])*self.ndims*len(self.fpts) for i in range(0, len(self.global_rhs_counts))], dtype=self._be.ixdtype)
+        self.comm.Allgatherv(rhs_sndbuf, [rhs_rcvbuf, (self.global_rhs_counts*self.ndims*len(self.fpts), rhs_disp)])
         self.global_rhs_plocs = []
         for disp, count in zip(rhs_disp, self.global_rhs_counts):
-            self.global_rhs_plocs.append(np.reshape(rhs_rcvbuf[disp:disp+count*2*len(self.fpts)], (-1, 2)))
+            self.global_rhs_plocs.append(np.reshape(rhs_rcvbuf[disp:disp+count*self.ndims*len(self.fpts)], (-1, self.ndims)))
         
         # Get global min and max for the face bounds (needed to mod transformed plocs)
-        self.global_lhs_min_bound = min([np.min(bounds.flatten()) for bounds in self.global_lhs_bounds if len(bounds) > 0])
-        self.global_lhs_max_bound = max([np.max(bounds.flatten()) for bounds in self.global_lhs_bounds if len(bounds) > 0])
-        self.global_rhs_min_bound = min([np.min(bounds.flatten()) for bounds in self.global_rhs_bounds if len(bounds) > 0])
-        self.global_rhs_max_bound = max([np.max(bounds.flatten()) for bounds in self.global_rhs_bounds if len(bounds) > 0])
+        self.global_lhs_min_bound = min([np.min(bounds[:,0].flatten()) for bounds in self.global_lhs_bounds if len(bounds) > 0])
+        self.global_lhs_max_bound = max([np.max(bounds[:,0].flatten()) for bounds in self.global_lhs_bounds if len(bounds) > 0])
+        self.global_rhs_min_bound = min([np.min(bounds[:,0].flatten()) for bounds in self.global_rhs_bounds if len(bounds) > 0])
+        self.global_rhs_max_bound = max([np.max(bounds[:,0].flatten()) for bounds in self.global_rhs_bounds if len(bounds) > 0])
 
     def _apply_transform_local(self, t):
         # Apply the transform to each side of the equation
@@ -457,8 +492,14 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         dist_v_l = (self.vl - self.vr) * t
         dist_u_r = 0.0 # (self.ur - self.ul) * t
         dist_v_r = (self.vr - self.vl) * t
-        t_ploc_lhs = self._lhs_plocs + np.array([dist_u_l, dist_v_l])
-        t_ploc_rhs = self._rhs_plocs + np.array([dist_u_r, dist_v_r])
+        if self.ndims == 2:
+            dist_l = np.array([dist_u_l, dist_v_l])
+            dist_r = np.array([dist_u_r, dist_v_r])
+        else:
+            dist_l = np.array([dist_u_l, dist_v_l, 0.0])
+            dist_r = np.array([dist_u_r, dist_v_r, 0.0])
+        t_ploc_lhs = self._lhs_plocs + dist_l
+        t_ploc_rhs = self._rhs_plocs + dist_r
 
         # Mod each ploc point to match the otherside's face bounds
         lhs_len = self.global_lhs_max_bound - self.global_lhs_min_bound
@@ -486,8 +527,12 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         dist_u_r = 0.0 # (self.ur - self.ul) * t
         dist_v_r = (self.vr - self.vl) * t
         t_ploc_lhs = []
-        dist_l = np.array([dist_u_l, dist_v_l])
-        dist_r = np.array([dist_u_r, dist_v_r])
+        if self.ndims == 2:
+            dist_l = np.array([dist_u_l, dist_v_l])
+            dist_r = np.array([dist_u_r, dist_v_r])
+        else:
+            dist_l = np.array([dist_u_l, dist_v_l, 0.0])
+            dist_r = np.array([dist_u_r, dist_v_r, 0.0])
         for rank_ploc in self.global_lhs_plocs:
             t_ploc_lhs.append(rank_ploc + dist_l)
         t_ploc_rhs = []
@@ -516,24 +561,43 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     def _check_pt_in_line_face(self, pt, fbounds):
         return pt[1] + 1e-10 >= fbounds[0] and pt[1] - 1e-10 <= fbounds[1]
     
+    def _check_pt_in_poly_face(self, pt, fbounds):
+        verty = [_v[0] for _v in fbounds]
+        vertz = [_v[1] for _v in fbounds]
+
+        c = False
+        j = len(verty)-1
+
+        for i in range(len(verty)):
+            if ( ((vertz[i]>pt[2]) != (vertz[j]>pt[2])) and (pt[1] < (verty[j]-verty[i]) * (pt[2]-vertz[i]) / (vertz[j]-vertz[i]) + verty[i]) ):
+                c = not c
+            j = i
+
+        return c
+    
     def _check_pt_in_rank_bounding_box_line(self, pt, lhs):
         if lhs:
             return pt[1] + 1e-10 >= self.local_min_y_lhs and pt[1] - 1e-10 <= self.local_max_y_lhs
         else:
             return pt[1] + 1e-10 >= self.local_min_y_rhs and pt[1] - 1e-10 <= self.local_max_y_rhs
+    
+    def _check_pt_in_rank_bounding_box_square(self, pt, lhs):
+        if lhs:
+            return pt[1] + 1e-10 >= self.local_min_y_lhs and pt[1] - 1e-10 <= self.local_max_y_lhs and pt[2] + 1e-10 >= self.local_min_z_lhs and pt[2] - 1e-10 <= self.local_max_z_lhs
+        else:
+            return pt[1] + 1e-10 >= self.local_min_y_rhs and pt[1] - 1e-10 <= self.local_max_y_rhs and pt[2] + 1e-10 >= self.local_min_z_rhs and pt[2] - 1e-10 <= self.local_max_z_rhs
 
     def _node_idx_in_list(self, _node, _list):
-        for i in range(len(_list)):
-            if abs(_node - _list[i]) < 1e-8:
-                return i
-            # _match = True
-            # for _n1, _n2 in zip(_node, _list[i]):
-            #     if abs(_n1 - _n2) < 1e-8:
-            #         _match = False
-            #         break
-            # if _match:
-            #     return i
-        return -1
+        if self.ndims == 2:
+            for i in range(len(_list)):
+                if abs(_node - _list[i]) < 1e-8:
+                    return i
+            return -1
+        else:
+            for i in range(len(_list)):
+                if abs(_node[0] - _list[i][0]) < 1e-8 and abs(_node[1] - _list[i][1]) < 1e-8:
+                    return i
+            return -1
 
     def _construct_global_kd_tree(self):
         # Construct list of unique nodes and the associated faces for each one
@@ -598,7 +662,10 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     # Now using KDTrees
     def _get_rank_fidx_for_pts(self, pts_plocs, lhs):
-        _plocs_y = np.array([_y for _x, _y in pts_plocs]).reshape(-1, 1)
+        if self.ndims == 2:
+            _plocs_y = np.array([_y for _x, _y in pts_plocs]).reshape(-1, 1)
+        else:
+            _plocs_y = np.array([(_y, _z) for _x, _y, _z in pts_plocs]).reshape(-1, 2)
         _, nodeidxs = self.global_kd_tree.query(_plocs_y)
 
         rank_fidx = []
@@ -622,9 +689,9 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         for r in range(0, len(pts_plocs)):
             for pidx in range(0, len(pts_plocs[r])):
                 if self._check_pt_in_rank_bounding_box(pts_plocs[r][pidx], lhs_faces):
-                    _plocs_y.append(pts_plocs[r][pidx][1])
+                    _plocs_y.append(pts_plocs[r][pidx][1:])
                     _ranks_pidx.append((r, pidx))
-        _plocs_y = np.array(_plocs_y).reshape(-1, 1)
+        _plocs_y = np.array(_plocs_y).reshape(-1, self.ndims - 1)
 
         if lhs_faces:
             _, nodeidxs = self.local_lhs_kd_tree.query(_plocs_y)
@@ -648,7 +715,19 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     # Assume y axis aligned line
     def _get_rloc(self, pt_ploc, face_bounds):
-        return 2.0 * ((pt_ploc[1] - face_bounds[0]) / (face_bounds[1] - face_bounds[0])) - 1.0
+        if self.ndims == 2:
+            return 2.0 * ((pt_ploc[1] - face_bounds[0]) / (face_bounds[1] - face_bounds[0])) - 1.0
+        else:
+            # Currently assuming a cartesian axis aligned quad interface
+            miny = np.min(face_bounds[:,0])
+            maxy = np.max(face_bounds[:,0])
+            minz = np.min(face_bounds[:,1])
+            maxz = np.max(face_bounds[:,1])
+
+            return (
+                2.0 * ((pt_ploc[1] - miny) / (maxy - miny)) - 1.0,
+                2.0 * ((pt_ploc[2] - minz) / (maxz - minz)) - 1.0
+            )
     
     def _get_interp_mats_for_pts(self, pts_ploc, faces_bounds, interp_info):
         rlocs = []
@@ -696,20 +775,20 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         # Update sizes of backend matrices and set them to the correct values
         if len(self.lhs_interps_for_remote_rhs) != 0:
             self._lhs_fidx.resize((1, len(self.lhs_interps_for_remote_rhs)))
-            self._lhs_rloc.resize((1, len(self.lhs_interps_for_remote_rhs)))
+            self._lhs_rloc.resize((self.ndims - 1, len(self.lhs_interps_for_remote_rhs)))
             self._lhs_interp_mats.resize((len(self.fpts), len(self.lhs_interps_for_remote_rhs)))
             self._interp_results_for_remote_rhs.resize((self.nvars, len(self.lhs_interps_for_remote_rhs)))
             lhs_fidx = np.array([[fidx for fidx, _, _ in self.lhs_interps_for_remote_rhs]])
             self._lhs_fidx.set(np.reshape(lhs_fidx, (-1, 1)).swapaxes(0,1))
-            self._lhs_rloc.set(np.reshape(self.rlocs_remote_rhs, (-1, 1)).swapaxes(0,1))
+            self._lhs_rloc.set(np.reshape(self.rlocs_remote_rhs, (-1, self.ndims - 1)).swapaxes(0,1))
         if len(self.rhs_interps_for_remote_lhs) != 0:
             self._rhs_fidx.resize((1, len(self.rhs_interps_for_remote_lhs)))
-            self._rhs_rloc.resize((1, len(self.rhs_interps_for_remote_lhs)))
+            self._rhs_rloc.resize((self.ndims - 1, len(self.rhs_interps_for_remote_lhs)))
             self._rhs_interp_mats.resize((len(self.fpts), len(self.rhs_interps_for_remote_lhs)))
             self._interp_results_for_remote_lhs.resize((self.nvars, len(self.rhs_interps_for_remote_lhs)))
             rhs_fidx = np.array([[fidx for fidx, _, _ in self.rhs_interps_for_remote_lhs]])
             self._rhs_fidx.set(np.reshape(rhs_fidx, (-1, 1)).swapaxes(0,1))
-            self._rhs_rloc.set(np.reshape(self.rlocs_remote_lhs, (-1, 1)).swapaxes(0,1))
+            self._rhs_rloc.set(np.reshape(self.rlocs_remote_lhs, (-1, self.ndims - 1)).swapaxes(0,1))
 
         # Update dims of interpolation kernels
         if self.ninters_rhs:

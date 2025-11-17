@@ -184,10 +184,9 @@ class BaseAdvectionBCInters(BaseAdvectionIntersMixin, BaseInters):
 import time
 
 # Current assumptions:
-# - 2D
 # - The interface is parallel to the y-axis (i.e. sign of the normal's x-component can split interface, also for pt to face mapping)
 # - Linear interface
-# - Entropy filtering is currently wrong
+# - Entropy filtering doesn't take minimum across sliding interface
 class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
     type = None
 
@@ -216,11 +215,13 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         if self.ndims == 2:
             self._check_pt_in_face = self._check_pt_in_line_face
             self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_line
+            self._get_rloc = self._get_rloc_line
             linepts = cfg.get('solver-interfaces-line', 'flux-pts')
             self.fpts = get_quadrule('line', linepts, qdeg=self.order+2).pts
         else:
             self._check_pt_in_face = self._check_pt_in_poly_face
             self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_square
+            self._get_rloc = self._get_rloc_quad
             linepts = cfg.get('solver-interfaces-quad', 'flux-pts')
             self.fpts = get_quadrule('quad', linepts, qdeg=self.order+2).pts
 
@@ -418,7 +419,6 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self._rhs_plocs = np.reshape(self._rhs_plocs, (-1, self.ndims))
         self._lhs_face_bounds = np.array(self._lhs_face_bounds)
         self._rhs_face_bounds = np.array(self._rhs_face_bounds)
-        print(np.shape(self._lhs_face_bounds))
 
         if len(self._lhs_face_bounds) > 0:
             self.local_min_y_lhs = np.min(self._lhs_face_bounds[:,:,0])
@@ -662,10 +662,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
     # Now using KDTrees
     def _get_rank_fidx_for_pts(self, pts_plocs, lhs):
-        if self.ndims == 2:
-            _plocs_y = np.array([_y for _x, _y in pts_plocs]).reshape(-1, 1)
-        else:
-            _plocs_y = np.array([(_y, _z) for _x, _y, _z in pts_plocs]).reshape(-1, 2)
+        _plocs_y = pts_plocs[:,1:]
         _, nodeidxs = self.global_kd_tree.query(_plocs_y)
 
         rank_fidx = []
@@ -714,21 +711,21 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         return interp_info
 
     # Assume y axis aligned line
-    def _get_rloc(self, pt_ploc, face_bounds):
-        if self.ndims == 2:
-            return 2.0 * ((pt_ploc[1] - face_bounds[0]) / (face_bounds[1] - face_bounds[0])) - 1.0
-        else:
-            # Currently assuming a cartesian axis aligned quad interface
-            miny = np.min(face_bounds[:,0])
-            maxy = np.max(face_bounds[:,0])
-            minz = np.min(face_bounds[:,1])
-            maxz = np.max(face_bounds[:,1])
-
-            return (
-                2.0 * ((pt_ploc[1] - miny) / (maxy - miny)) - 1.0,
-                2.0 * ((pt_ploc[2] - minz) / (maxz - minz)) - 1.0
-            )
+    def _get_rloc_line(self, pt_ploc, face_bounds):
+        return 2.0 * ((pt_ploc[1] - face_bounds[0]) / (face_bounds[1] - face_bounds[0])) - 1.0
     
+    # Currently assuming a cartesian axis aligned quad interface
+    def _get_rloc_quad(self, pt_ploc, face_bounds):
+        miny = np.min(face_bounds[:,0])
+        maxy = np.max(face_bounds[:,0])
+        minz = np.min(face_bounds[:,1])
+        maxz = np.max(face_bounds[:,1])
+
+        return (
+            2.0 * ((pt_ploc[1] - miny) / (maxy - miny)) - 1.0,
+            2.0 * ((pt_ploc[2] - minz) / (maxz - minz)) - 1.0
+        )
+
     def _get_interp_mats_for_pts(self, pts_ploc, faces_bounds, interp_info):
         rlocs = []
         for fidx, rank, pidx in interp_info:

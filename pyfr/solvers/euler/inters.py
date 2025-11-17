@@ -256,7 +256,10 @@ class EulerBaseSlidingInters(TplargsMixin, BaseAdvectionSlidingInters):
         self._be.pointwise.register('pyfr.solvers.euler.kernels.siintcfluxrhs')
 
         self._tplargs |= dict(nvars=self.nvars, nftps=len(self.fpts))
-        self._tplargs |= dict(vel_l=(self.ul, self.vl), vel_r=(self.ur, self.vr))
+        if self.ndims == 2:
+            self._tplargs |= dict(vel_l=(self.ul, self.vl), vel_r=(self.ur, self.vr))
+        else:
+            self._tplargs |= dict(vel_l=(self.ul, self.vl, self.wl), vel_r=(self.ur, self.vr, self.wr))
 
         if self.ninters_lhs:
             self.kernels['comm_flux_lhs'] = lambda: self._be.kernel(

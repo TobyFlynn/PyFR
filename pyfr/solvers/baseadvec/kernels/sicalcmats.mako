@@ -49,8 +49,8 @@
     }
 
     int c = 0;
-    for(int j = 0; j < ${str(order)}; j++) {
-        for(int i = 0; i < ${str(order)}; i++) {
+    for(int i = 0; i < ${str(order)}; i++) {
+        for(int j = 0; j < ${str(order)}; j++) {
             ortho_basis[c++] = ja[i] * jb[j];
         }
     }

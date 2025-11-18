@@ -219,9 +219,9 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
             linepts = cfg.get('solver-interfaces-line', 'flux-pts')
             self.fpts = get_quadrule('line', linepts, qdeg=self.order+2).pts
         else:
-            self._check_pt_in_face = self._check_pt_in_poly_face
+            self._check_pt_in_face = self._check_pt_in_quad_face_sim # self._check_pt_in_poly_face
             self._check_pt_in_rank_bounding_box = self._check_pt_in_rank_bounding_box_square
-            self._get_rloc = self._get_rloc_quad
+            self._get_rloc = self._get_rloc_quad_sim # self._get_rloc_quad
             linepts = cfg.get('solver-interfaces-quad', 'flux-pts')
             self.fpts = get_quadrule('quad', linepts, qdeg=self.order+2).pts
 
@@ -484,6 +484,28 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         self.global_rhs_min_bound = min([np.min(bounds[:,0].flatten()) for bounds in self.global_rhs_bounds if len(bounds) > 0])
         self.global_rhs_max_bound = max([np.max(bounds[:,0].flatten()) for bounds in self.global_rhs_bounds if len(bounds) > 0])
 
+        self._simplify_bounds()
+    
+    def _simplify_bounds(self):
+        if self.ndims == 2:
+            self._sim_lhs_face_bounds, self._sim_rhs_face_bounds = self._lhs_face_bounds, self._rhs_face_bounds
+            self._sim_global_lhs_bounds, self._sim_global_rhs_bounds = self.global_lhs_bounds, self.global_rhs_bounds
+        else:
+            self._sim_lhs_face_bounds, self._sim_rhs_face_bounds = [], []
+            self._sim_global_lhs_bounds, self._sim_global_rhs_bounds = [], []
+            for face_bounds in self._lhs_face_bounds:
+                self._sim_lhs_face_bounds.append([np.min(face_bounds[:,0]), np.max(face_bounds[:,0]), np.min(face_bounds[:,1]), np.max(face_bounds[:,1])])
+            for face_bounds in self._rhs_face_bounds:
+                self._sim_rhs_face_bounds.append([np.min(face_bounds[:,0]), np.max(face_bounds[:,0]), np.min(face_bounds[:,1]), np.max(face_bounds[:,1])])
+            for rank in range(len(self.global_lhs_bounds)):
+                self._sim_global_lhs_bounds.append([])
+                for face_bounds in self.global_lhs_bounds[rank]:
+                    self._sim_global_lhs_bounds[rank].append([np.min(face_bounds[:,0]), np.max(face_bounds[:,0]), np.min(face_bounds[:,1]), np.max(face_bounds[:,1])])
+            for rank in range(len(self.global_rhs_bounds)):
+                self._sim_global_rhs_bounds.append([])
+                for face_bounds in self.global_rhs_bounds[rank]:
+                    self._sim_global_rhs_bounds[rank].append([np.min(face_bounds[:,0]), np.max(face_bounds[:,0]), np.min(face_bounds[:,1]), np.max(face_bounds[:,1])])
+
     def _apply_transform_local(self, t):
         # Apply the transform to each side of the equation
         # Only transform the points, not the face bounds 
@@ -562,18 +584,19 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         return pt[1] + 1e-10 >= fbounds[0] and pt[1] - 1e-10 <= fbounds[1]
     
     def _check_pt_in_poly_face(self, pt, fbounds):
-        verty = [_v[0] for _v in fbounds]
-        vertz = [_v[1] for _v in fbounds]
-
         c = False
-        j = len(verty)-1
+        j = len(fbounds)-1
 
-        for i in range(len(verty)):
-            if ( ((vertz[i]>pt[2]) != (vertz[j]>pt[2])) and (pt[1] < (verty[j]-verty[i]) * (pt[2]-vertz[i]) / (vertz[j]-vertz[i]) + verty[i]) ):
+        for i in range(len(fbounds)):
+            if ( ((fbounds[i,1]>pt[2]) != (fbounds[j,1]>pt[2])) and 
+                 (pt[1] < (fbounds[j,0]-fbounds[i,0]) * (pt[2]-fbounds[i,1]) / (fbounds[j,1]-fbounds[i,1]) + fbounds[i,0]) ):
                 c = not c
             j = i
 
         return c
+    
+    def _check_pt_in_quad_face_sim(self, pt, fbounds):
+        return pt[1] + 1e-10 >= fbounds[0] and pt[1] - 1e-10 <= fbounds[1] and pt[2] + 1e-10 >= fbounds[2] and pt[2] - 1e-10 <= fbounds[3]
     
     def _check_pt_in_rank_bounding_box_line(self, pt, lhs):
         if lhs:
@@ -667,7 +690,7 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
 
         rank_fidx = []
         kd_tree_data = self.global_kd_tree_data_lhs if lhs else self.global_kd_tree_data_rhs
-        face_bounds = self.global_lhs_bounds if lhs else self.global_rhs_bounds
+        face_bounds = self._sim_global_lhs_bounds if lhs else self._sim_global_rhs_bounds
         for i, nodeidx in enumerate(nodeidxs):
             for _rank, _fidx in kd_tree_data[nodeidx]:
                 if self._check_pt_in_face(pts_plocs[i], face_bounds[_rank][_fidx]):
@@ -693,11 +716,11 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         if lhs_faces:
             _, nodeidxs = self.local_lhs_kd_tree.query(_plocs_y)
             kd_tree_data = self.local_lhs_kd_tree_data
-            face_bounds = self._lhs_face_bounds
+            face_bounds = self._sim_lhs_face_bounds
         else:
             _, nodeidxs = self.local_rhs_kd_tree.query(_plocs_y)
             kd_tree_data = self.local_rhs_kd_tree_data
-            face_bounds = self._rhs_face_bounds
+            face_bounds = self._sim_rhs_face_bounds
     
         interp_info = []
 
@@ -725,14 +748,12 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
             2.0 * ((pt_ploc[1] - miny) / (maxy - miny)) - 1.0,
             2.0 * ((pt_ploc[2] - minz) / (maxz - minz)) - 1.0
         )
-
-    def _get_interp_mats_for_pts(self, pts_ploc, faces_bounds, interp_info):
-        rlocs = []
-        for fidx, rank, pidx in interp_info:
-            face_bounds = faces_bounds[fidx]
-            rloc = self._get_rloc(pts_ploc[rank][pidx], face_bounds)
-            rlocs.append(rloc)
-        return self._face_polybasis.nodal_basis_at(rlocs)
+    
+    def _get_rloc_quad_sim(self, pt_ploc, face_bounds):
+        return (
+            2.0 * ((pt_ploc[1] - face_bounds[0]) / (face_bounds[1] - face_bounds[0])) - 1.0,
+            2.0 * ((pt_ploc[2] - face_bounds[2]) / (face_bounds[3] - face_bounds[2])) - 1.0
+        )
     
     def _get_rloc_for_pts(self, pts_ploc, faces_bounds, interp_info):
         rlocs = []
@@ -746,7 +767,6 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         tstart = time.time()
         # Get the current plocs of each face point
         lhs_plocs, rhs_plocs = self._apply_transform_local(t)
-        lhs_face_bounds, rhs_face_bounds = self.global_lhs_bounds, self.global_rhs_bounds
         self._prepare1_time += time.time() - tstart
         tstart1 = time.time()
 
@@ -764,8 +784,8 @@ class BaseAdvectionSlidingInters(BaseAdvectionIntersMixin, BaseInters):
         tstart1 = time.time()
 
         # Calculate matrix to interpolate to face point
-        self.rlocs_remote_rhs = self._get_rloc_for_pts(global_rhs_plocs, self._lhs_face_bounds, self.lhs_interps_for_remote_rhs)
-        self.rlocs_remote_lhs = self._get_rloc_for_pts(global_lhs_plocs, self._rhs_face_bounds, self.rhs_interps_for_remote_lhs)
+        self.rlocs_remote_rhs = self._get_rloc_for_pts(global_rhs_plocs, self._sim_lhs_face_bounds, self.lhs_interps_for_remote_rhs)
+        self.rlocs_remote_lhs = self._get_rloc_for_pts(global_lhs_plocs, self._sim_rhs_face_bounds, self.rhs_interps_for_remote_lhs)
         self._prepare4_time += time.time() - tstart1
         tstart1 = time.time()
 

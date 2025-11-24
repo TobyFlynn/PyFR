@@ -85,7 +85,7 @@ class BaseSystem:
                                   for eles in self.ele_map.values())
 
         # Delete the memory-intensive ele_map
-        del self.ele_map
+        # del self.ele_map
 
         # Save the BC interfaces, but delete the memory-intensive elemap
         for b in self._bc_inters:

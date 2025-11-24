@@ -300,7 +300,7 @@ class _AscentRenderer:
 
         eidx = adapter.etypes.index(etype)
         soln_op, xd = adapter.soln_op_vpts(etype, divisor)
-        self._ele_regions_lin.append((d_str, eidx, rgn, soln_op))
+        self._ele_regions_lin.append((etype, d_str, eidx, rgn, soln_op))
 
         xd = xd[..., rgn].transpose(1, 2, 0)
         ndims, neles, nsvpts = xd.shape
@@ -465,20 +465,29 @@ class _AscentRenderer:
         # Compute the gradients
         if self._gradpinfo:
             grad_soln = adapter.grad_soln
+        
+        sorder = adapter.scfg.getint('solver', 'order')
+        divisor = adapter.acfg.getint(adapter.cfgsect, 'division', sorder)
 
         # Iterate over each element type in our region
-        for d_str, idx, rgn, soln_op in self._ele_regions_lin:
+        for etype, d_str, idx, rgn, soln_op in self._ele_regions_lin:
             self.mesh_n[f'{d_str}/state/time/keyword'] = 'Time'
             self.mesh_n[f'{d_str}/state/time/data'] = str(adapter.tcurr)
 
             # Subset and transpose the solution
             csolns = soln[idx][..., rgn].swapaxes(0, 1)
+            soln_op, xd = adapter.soln_op_vpts(etype, divisor)
+            xd = xd[..., rgn].transpose(1, 2, 0)
 
             # Interpolate the solution to the subdivided points
             csolns = soln_op @ csolns
 
             # Convert from conservative to primitive variables
             psolns = elementscls.con_to_pri(csolns, adapter.scfg)
+            for i in range(xd.shape[1]):
+                if np.sum(xd[0,i]) / xd.shape[2] <= 10.0:
+                    for j in range(xd.shape[2]):
+                        psolns[2][j][i] -= 0.5
 
             # Prepare the substitutions dictionary
             subs = dict(zip(pnames, psolns), t=adapter.tcurr)
@@ -516,8 +525,35 @@ class _AscentRenderer:
         gen = file_path_gen(self.basedir, opts['image-name'], self.isrestart)
         self._image_paths.append((f'scenes/{path}/image_name', gen))
 
+    def _update_mesh_coords(self, rank, adapter, etype, rgn, divisor):
+        d_str = f'domain_{rank}_{etype}'
+        e_str = f'{d_str}/topologies/mesh/elements'
+
+        eidx = adapter.etypes.index(etype)
+        soln_op, xd = adapter.soln_op_vpts(etype, divisor)
+        xd = xd[..., rgn].transpose(1, 2, 0)
+
+        tcurr = adapter.tcurr
+        for i in range(xd.shape[1]):
+            if np.sum(xd[0,i]) / xd.shape[2] <= 10.0:
+                xd[1,i] += -0.5 * tcurr
+            avg_y = np.sum(xd[1,i]) / xd.shape[2]
+            if avg_y < 0.0:
+                xd[1,i] += np.floor((10.0 - avg_y) / 10.0) * 10.0
+
+        xd = xd.reshape(adapter.ndims, -1)
+        for l, x in zip('xyz', xd):
+            self.mesh_n[f'{d_str}/coordsets/coords/values/{l}'] = x
+
+
     def render(self, adapter):
         comm, rank, root = get_comm_rank_root()
+
+        sorder = adapter.scfg.getint('solver', 'order')
+        divisor = adapter.acfg.getint(adapter.cfgsect, 'division', sorder)
+        for etype, eidxs in adapter.region_data.items():
+            # Build the conduit blueprint mesh for the regions
+            self._update_mesh_coords(rank, adapter, etype, eidxs, divisor)
 
         # Set file names
         for path, gen in self._image_paths:

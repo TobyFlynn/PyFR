@@ -270,6 +270,7 @@ class _AscentRenderer:
         self._init_fields(adapter, adapter.cfgsect)
         self._init_scenes(adapter, adapter.cfgsect)
         self._init_pipelines(adapter, adapter.cfgsect)
+        self._init_extracts(adapter, adapter.cfgsect)
 
         if not self._fields_read.issubset(self._fields_write):
             raise AscentError('Not all fields used are defined')
@@ -372,13 +373,17 @@ class _AscentRenderer:
 
         # Pre configure scenes and pipelines
         self.actions = ConduitNode(self.conduit)
-        self._add_scene = self.actions.append()
-        self._add_scene['action'] = 'add_scenes'
-        self._add_scene['scenes'] = self.scenes
+        self._add_extract = self.actions.append()
+        self._add_extract['action'] = 'add_extracts'
+        self._add_extract['extracts'] = self.extracts
 
-        self._add_pipeline = self.actions.append()
-        self._add_pipeline['action'] = 'add_pipelines'
-        self._add_pipeline['pipelines'] = self.pipelines
+        # self._add_scene = self.actions.append()
+        # self._add_scene['action'] = 'add_scenes'
+        # self._add_scene['scenes'] = self.scenes
+
+        # self._add_pipeline = self.actions.append()
+        # self._add_pipeline['action'] = 'add_pipelines'
+        # self._add_pipeline['pipelines'] = self.pipelines
 
     def _init_fields(self, adapter, cfgsect):
         cons = adapter.scfg.items_as('constants', float)
@@ -455,6 +460,11 @@ class _AscentRenderer:
             if not any(kc.startswith('render-') for kc in cfg):
                 raise KeyError(f"No render config given for scene '{sn}'")
 
+    def _init_extracts(self, adapter, cfgsect):
+        self.extracts = ConduitNode(self.conduit)
+        self.extracts['e1/type'] = 'python'
+        self.extracts['e1/params/file'] = 'paraview-vis.py'
+
     def _eval_exprs(self, adapter):
         elementscls = adapter.elementscls
 
@@ -522,8 +532,8 @@ class _AscentRenderer:
         comm, rank, root = get_comm_rank_root()
 
         # Set file names
-        for path, gen in self._image_paths:
-            self._add_scene[path] = gen.send(adapter.tcurr)
+        # for path, gen in self._image_paths:
+        #     self._add_scene[path] = gen.send(adapter.tcurr)
 
         # Set field expressions
         self._eval_exprs(adapter)

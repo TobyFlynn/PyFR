@@ -532,17 +532,18 @@ class _AscentRenderer:
         eidx = adapter.etypes.index(etype)
         soln_op, xd = adapter.soln_op_vpts(etype, divisor)
         xd = xd[..., rgn].transpose(1, 2, 0)
+        xdz = np.zeros(xd.shape)
 
         tcurr = adapter.tcurr
         for i in range(xd.shape[1]):
-            if np.sum(xd[0,i]) / xd.shape[2] <= 10.0:
-                xd[1,i] += -0.5 * tcurr
-            avg_y = np.sum(xd[1,i]) / xd.shape[2]
-            if avg_y < 0.0:
-                xd[1,i] += np.floor((10.0 - avg_y) / 10.0) * 10.0
+            xdz[:,i,:] = xd[:,i,:]
+            avg_y = np.sum(xdz[1,i]) / xdz.shape[2]
+            if np.sum(xdz[0,i]) / xdz.shape[2] <= 10.0:
+                disp = -0.5 * tcurr + np.floor((10.0 - (avg_y - 0.5 * tcurr)) / 10.0) * 10.0
+                xdz[1,i,:] += disp
 
-        xd = xd.reshape(adapter.ndims, -1)
-        for l, x in zip('xyz', xd):
+        xdz = xdz.reshape(adapter.ndims, -1)
+        for l, x in zip('xyz', xdz):
             self.mesh_n[f'{d_str}/coordsets/coords/values/{l}'] = x
 
 

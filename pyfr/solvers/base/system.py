@@ -15,6 +15,7 @@ from pyfr.util import subclasses
 class BaseSystem:
     elementscls = None
     intinterscls = None
+    pinterscls = None
     mpiinterscls = None
     bbcinterscls = None
 
@@ -73,7 +74,9 @@ class BaseSystem:
         self._alloc_register_banks(registers, eles, ics)
 
         # Load the interfaces
+        p_inters = self._load_p_inters(mesh, elemap)
         self._int_inters = self._load_int_inters(mesh, elemap)
+        self._int_inters.extend(p_inters)
         self._mpi_inters = self._load_mpi_inters(mesh, elemap)
         bcs = self._load_bc_inters(mesh, elemap, initsoln, serialiser)
         self._bc_inters, self._bc_bindfns, self._bc_advfns = bcs
@@ -251,6 +254,22 @@ class BaseSystem:
                                        self.cfg)
 
         return [int_inters]
+
+    def _load_p_inters(self, mesh, elemap):
+        # Sort periodic RHS flux points in the LHS coordinate frame
+        for _, rhs in mesh.pcon.values():
+            rot, shift = rhs.transform
+            for etype, fidx, eidxs in rhs.items():
+                transforms = elemap[etype].face_transforms
+                transforms[fidx].append((eidxs, rot, shift))
+
+        p_inters = []
+        for name, (lhs, rhs) in mesh.pcon.items():
+            piface = self.pinterscls(self.backend, lhs, rhs, elemap, self.cfg,
+                                     rhs.transform, name)
+            p_inters.append(piface)
+
+        return p_inters
 
     def _load_mpi_inters(self, mesh, elemap):
         mpi_inters = []

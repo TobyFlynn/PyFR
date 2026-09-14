@@ -1,6 +1,8 @@
 import itertools as it
 import math
 
+import numpy as np
+
 from pyfr.exprs import npeval
 from pyfr.solvers.base import BaseInters
 
@@ -26,6 +28,18 @@ class BaseAdvectionIntInters(BaseInters):
         # Arbitrarily, take the permutation which results in an optimal
         # memory access pattern for the LHS of the interface
         self._perm = self._get_perm_for_field(lhs, scal)
+
+
+class BaseAdvectionPeriodicInters(BaseAdvectionIntInters):
+    def __init__(self, be, lhs, rhs, elemap, cfg, transform, name):
+        self._rot, self._shift = transform
+
+        super().__init__(be, lhs, rhs, elemap, cfg)
+
+        self.name = name
+
+        if not np.allclose(self._rot, np.eye(self.ndims)):
+            raise ValueError('Rotational periodicity is not supported')
 
 
 class BaseAdvectionMPIInters(BaseInters):

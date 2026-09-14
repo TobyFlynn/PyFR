@@ -1,6 +1,7 @@
 import numpy as np
 
 from pyfr.exprs import npeval
+from pyfr.solvers.baseadvec import BaseAdvectionPeriodicInters
 from pyfr.solvers.baseadvecdiff import (BaseAdvectionDiffusionBCInters,
                                         BaseAdvectionDiffusionIntInters,
                                         BaseAdvectionDiffusionMPIInters)
@@ -46,6 +47,11 @@ class NavierStokesIntInters(TplargsMixin,
             gradul=self._vect_lhs, gradur=self._vect_rhs,
             artvisc=self.artvisc, nl=self._pnorm_lhs
         )
+
+
+class NavierStokesPeriodicInters(BaseAdvectionPeriodicInters,
+                                 NavierStokesIntInters):
+    pass
 
 
 class NavierStokesMPIInters(TplargsMixin,

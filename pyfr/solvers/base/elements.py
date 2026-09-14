@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from functools import cached_property, wraps
 
@@ -56,6 +57,7 @@ class BaseElements:
 
         self.eles = eles
         self.cfg = cfg
+        self.face_transforms = defaultdict(list)
 
         self.nspts = nspts = eles.shape[0]
         self.neles = neles = eles.shape[1]
@@ -169,9 +171,16 @@ class BaseElements:
         plocfpts = self.plocfpts
         sffpts = []
 
-        for ffpts in self.basis.facefpts:
+        for fidx, ffpts in enumerate(self.basis.facefpts):
             ffpts = np.asarray(ffpts)
             coords = plocfpts[ffpts].transpose(1, 2, 0)
+
+            # Express selected face coordinates in their partner's frame
+            if transforms := self.face_transforms.get(fidx):
+                for eidxs, rot, shift in transforms:
+                    pts = coords[eidxs] - shift[None, :, None]
+                    coords[eidxs] = np.einsum('eik,ij->ejk', pts, rot)
+
             perm = batched_fuzzysort(coords)
             sffpts.append(ffpts[perm])
 

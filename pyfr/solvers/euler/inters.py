@@ -2,7 +2,8 @@ from pyfr.mpiutil import mpi, scal_coll
 from pyfr.quadrules.surface import SurfaceIntegrator
 from pyfr.solvers.baseadvec import (BaseAdvectionIntInters,
                                     BaseAdvectionMPIInters,
-                                    BaseAdvectionBCInters)
+                                    BaseAdvectionBCInters,
+                                    BaseAdvectionPeriodicInters)
 from pyfr.util import CSVStream, first
 
 import numpy as np
@@ -34,6 +35,10 @@ class EulerIntInters(TplargsMixin, BaseAdvectionIntInters):
             'intcflux', tplargs=self._tplargs, dims=[self.ninterfpts],
             ul=self.scal_lhs, ur=self.scal_rhs, nl=self._pnorm_lhs
         )
+
+
+class EulerPeriodicInters(BaseAdvectionPeriodicInters, EulerIntInters):
+    pass
 
 
 class EulerMPIInters(TplargsMixin, BaseAdvectionMPIInters):
